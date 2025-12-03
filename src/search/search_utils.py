@@ -14,3 +14,16 @@ def search_by_http(query: str, host: str = 'localhost', port: int = 8090) -> Lis
     else:
         logger.error(f"Failed to get a response. Status code: {response.status_code}")
         return []
+
+
+def search_by_graph_api(query: str, url: str) -> List[Dict]:
+    try:
+        response = requests.post(url, json={'query': query}, headers={"Content-Type": "application/json"})
+        if response.status_code == 200:
+            return response.json()
+        else:
+            logger.error(f"Failed to get a response from graph API. Status code: {response.status_code}")
+            return []
+    except Exception as e:
+        logger.error(f"Error calling graph API: {e}")
+        return []

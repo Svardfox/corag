@@ -9,7 +9,7 @@ from transformers import AutoTokenizer, PreTrainedTokenizerFast
 
 from logger_config import logger
 from vllm_client import VllmClient, get_vllm_model_id
-from search.search_utils import search_by_http
+from search.search_utils import search_by_http, search_by_graph_api
 from data_utils import format_input_context, parse_answer_logprobs
 from prompts import get_generate_subquery_prompt, get_generate_intermediate_answer_prompt, get_generate_final_answer_prompt
 from agent.agent_utils import RagPath
@@ -29,10 +29,12 @@ def _normalize_subquery(subquery: str) -> str:
 class CoRagAgent:
 
     def __init__(
-            self, vllm_client: VllmClient, corpus: Dataset
+            self, vllm_client: VllmClient, corpus: Dataset,
+            graph_api_url: Optional[str] = None
     ):
         self.vllm_client = vllm_client
         self.corpus = corpus
+        self.graph_api_url = graph_api_url
         self.tokenizer: PreTrainedTokenizerFast = AutoTokenizer.from_pretrained(get_vllm_model_id())
         self.lock = threading.Lock()
 
@@ -128,9 +130,23 @@ class CoRagAgent:
     def _get_subanswer_and_doc_ids(
             self, subquery: str, max_message_length: int = 4096
     ) -> Tuple[str, List]:
-        retriever_results: List[Dict] = search_by_http(query=subquery)
-        doc_ids: List[str] = [res['doc_id'] for res in retriever_results]
-        documents: List[str] = [format_input_context(self.corpus[int(doc_id)]) for doc_id in doc_ids][::-1]
+        if self.graph_api_url:
+            retriever_results = search_by_graph_api(query=subquery, url=self.graph_api_url)
+            documents = []
+            doc_ids = []
+            for res in retriever_results:
+                if isinstance(res, str):
+                    documents.append(res)
+                    doc_ids.append('graph_chunk')
+                elif isinstance(res, dict):
+                    content = res.get('contents') or res.get('content') or res.get('text') or str(res)
+                    documents.append(content)
+                    doc_ids.append(str(res.get('id') or res.get('doc_id') or 'graph_chunk'))
+            documents = documents[::-1]
+        else:
+            retriever_results: List[Dict] = search_by_http(query=subquery)
+            doc_ids: List[str] = [res['doc_id'] for res in retriever_results]
+            documents: List[str] = [format_input_context(self.corpus[int(doc_id)]) for doc_id in doc_ids][::-1]
 
         messages: List[Dict] = get_generate_intermediate_answer_prompt(
             subquery=subquery,

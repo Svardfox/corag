@@ -1,4 +1,6 @@
 import random
+import json
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 
 from typing import List, Dict, Optional
 from datasets import load_dataset, Dataset
@@ -12,10 +14,29 @@ from utils import batch_truncate
 from logger_config import logger
 
 
-def load_corpus() -> Dataset:
-    corpus: Dataset = load_dataset('corag/kilt-corpus', split='train')
-    logger.info(f'Loaded {len(corpus)} passages from corag/kilt-corpus')
-    return corpus
+def load_corpus(corpus_file: Optional[str] = None) -> Dataset:
+    if corpus_file:
+        logger.info(f"Loading corpus from {corpus_file}...")
+        with open(corpus_file, 'r', encoding='utf-8') as f:
+            corpus_data = json.load(f)
+        
+        # Extract only the text content
+        texts = [item['text'] for item in corpus_data if 'text' in item]
+        logger.info(f"Successfully loaded {len(texts)} documents.")
+
+        logger.info("Starting to split documents...")
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=2048, chunk_overlap=100)
+        chunks = text_splitter.split_text(' '.join(texts))
+        logger.info(f"Documents were split into {len(chunks)} chunks.")
+        
+        # Create a Dataset object
+        data = [{'contents': chunk, 'title': ''} for chunk in chunks]
+        corpus = Dataset.from_list(data)
+        return corpus
+    else:
+        corpus: Dataset = load_dataset('corag/kilt-corpus', split='train')
+        logger.info(f'Loaded {len(corpus)} passages from corag/kilt-corpus')
+        return corpus
 
 
 def log_random_samples(dataset: Dataset, num_samples: int = 3):

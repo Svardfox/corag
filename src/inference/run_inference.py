@@ -26,8 +26,8 @@ args: Arguments = parser.parse_args_into_dataclasses()[0]
 logger.info('Args={}'.format(str(args)))
 
 vllm_client: VllmClient = VllmClient(get_vllm_model_id())
-corpus: Dataset = load_corpus()
-corag_agent: CoRagAgent = CoRagAgent(vllm_client=vllm_client, corpus=corpus)
+corpus: Dataset = load_corpus(args.corpus_file)
+corag_agent: CoRagAgent = CoRagAgent(vllm_client=vllm_client, corpus=corpus, graph_api_url=args.graph_api_url)
 tokenizer: PreTrainedTokenizerFast = AutoTokenizer.from_pretrained(get_vllm_model_id())
 tokenizer_lock: threading.Lock = threading.Lock()
 processed_cnt: AtomicCounter = AtomicCounter()

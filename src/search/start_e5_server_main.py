@@ -29,6 +29,7 @@ async def server_loop(q):
     searcher: E5Searcher = E5Searcher(
         index_dir=os.getenv('INDEX_DIR', 'data/e5-large-index/'),
         model_name_or_path=os.getenv('E5_MODEL_NAME_OR_PATH', 'intfloat/e5-large-v2'),
+        corpus_file=os.getenv('CORPUS_FILE', None),
     )
     top_k = int(os.getenv('TOP_K', 5))
     logger.info(f'E5Searcher initialized, ready to serve requests, top_k={top_k}')

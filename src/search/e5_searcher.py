@@ -27,10 +27,12 @@ class E5Searcher:
             self, index_dir: str,
             model_name_or_path: str = 'intfloat/e5-large-v2',
             verbose: bool = False,
+            corpus_file: str = None,
     ):
         self.model_name_or_path = model_name_or_path
         self.index_dir = index_dir
         self.verbose = verbose
+        self.corpus_file = corpus_file
 
         n_gpus: int = torch.cuda.device_count()
         self.gpu_ids: List[int] = list(range(n_gpus))
@@ -52,7 +54,7 @@ class E5Searcher:
             split_embeddings[i].to(f'cuda:{self.gpu_ids[i]}', dtype=torch.float16) for i in range(len(self.gpu_ids))
         ]
 
-        self.corpus: Dataset = load_corpus()
+        self.corpus: Dataset = load_corpus(self.corpus_file)
 
     @torch.no_grad()
     def batch_search(self, queries: List[str], k: int, **kwargs) -> List[List[Dict]]:
