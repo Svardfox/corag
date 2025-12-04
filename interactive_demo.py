@@ -26,7 +26,12 @@ def main():
     
     # Initialize components
     logger.info("Initializing VLLM Client...")
-    vllm_client: VllmClient = VllmClient(get_vllm_model_id())
+    if args.vllm_model:
+        model_id = args.vllm_model
+    else:
+        model_id = get_vllm_model_id(api_base=args.vllm_api_base, api_key=args.vllm_api_key)
+    
+    vllm_client: VllmClient = VllmClient(model=model_id, api_base=args.vllm_api_base, api_key=args.vllm_api_key)
     
     logger.info("Loading Corpus...")
     corpus: Dataset = load_corpus(args.corpus_file)
@@ -34,7 +39,7 @@ def main():
     logger.info("Initializing Agent...")
     corag_agent: CoRagAgent = CoRagAgent(vllm_client=vllm_client, corpus=corpus, graph_api_url=args.graph_api_url)
     
-    tokenizer: PreTrainedTokenizerFast = AutoTokenizer.from_pretrained(get_vllm_model_id())
+    tokenizer: PreTrainedTokenizerFast = AutoTokenizer.from_pretrained(model_id)
     tokenizer_lock: threading.Lock = threading.Lock()
 
     if args.max_path_length < 1:

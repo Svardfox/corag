@@ -40,6 +40,9 @@ class Arguments(TrainingArguments):
     best_n: int = field(default=4, metadata={'help': 'best of n'})
     graph_api_url: Optional[str] = field(default=None, metadata={'help': 'URL for the graph retrieval API'})
     corpus_file: Optional[str] = field(default=None, metadata={'help': 'Path to the corpus file (json)'})
+    vllm_api_base: str = field(default="http://localhost:8000/v1", metadata={'help': 'VLLM API base URL'})
+    vllm_api_key: str = field(default="token-123", metadata={'help': 'VLLM API key'})
+    vllm_model: Optional[str] = field(default=None, metadata={'help': 'VLLM model name. If provided, skips auto-detection.'})
 
     def __post_init__(self):
         super(Arguments, self).__post_init__()

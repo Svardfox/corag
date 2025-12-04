@@ -6,8 +6,11 @@ from openai.types.chat import ChatCompletion
 from utils import AtomicCounter
 
 
-def get_vllm_model_id(host: str = "localhost", port: int = 8000, api_key: str = "token-123") -> str:
-    openai_api_base = f"http://{host}:{port}/v1"
+def get_vllm_model_id(host: str = "localhost", port: int = 8000, api_key: str = "token-123", api_base: str = None) -> str:
+    if api_base:
+        openai_api_base = api_base
+    else:
+        openai_api_base = f"http://{host}:{port}/v1"
 
     client = OpenAI(
         api_key=api_key,
@@ -20,11 +23,16 @@ def get_vllm_model_id(host: str = "localhost", port: int = 8000, api_key: str = 
 
 class VllmClient:
 
-    def __init__(self, model: str, host: str = 'localhost', port: int = 8000, api_key: str = 'token-123'):
+    def __init__(self, model: str, host: str = 'localhost', port: int = 8000, api_key: str = 'token-123', api_base: str = None):
         super().__init__()
         self.model = model
+        if api_base:
+            base_url = api_base
+        else:
+            base_url = f"http://{host}:{port}/v1"
+            
         self.client: OpenAI = OpenAI(
-            base_url=f"http://{host}:{port}/v1",
+            base_url=base_url,
             api_key=api_key,
         )
         self.token_consumed: AtomicCounter = AtomicCounter()
