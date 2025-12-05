@@ -42,7 +42,14 @@ def main():
     
     logger.info("Initializing Agent...")
     tokenizer_name = args.tokenizer_name if args.tokenizer_name else model_id
-    tokenizer: PreTrainedTokenizerFast = AutoTokenizer.from_pretrained(tokenizer_name)
+    try:
+        tokenizer: PreTrainedTokenizerFast = AutoTokenizer.from_pretrained(tokenizer_name)
+    except Exception as e:
+        if args.tokenizer_name is None:
+            logger.error(f"Failed to load tokenizer from '{tokenizer_name}'. If this is a remote path from vLLM, please specify a local tokenizer using --tokenizer_name <huggingface_repo_id>.")
+            sys.exit(1)
+        else:
+            raise e
     corag_agent: CoRagAgent = CoRagAgent(vllm_client=vllm_client, corpus=corpus, graph_api_url=args.graph_api_url, tokenizer=tokenizer)
     
     tokenizer_lock: threading.Lock = threading.Lock()
