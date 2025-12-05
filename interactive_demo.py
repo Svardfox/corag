@@ -41,9 +41,10 @@ def main():
         corpus = None
     
     logger.info("Initializing Agent...")
-    corag_agent: CoRagAgent = CoRagAgent(vllm_client=vllm_client, corpus=corpus, graph_api_url=args.graph_api_url)
+    tokenizer_name = args.tokenizer_name if args.tokenizer_name else model_id
+    tokenizer: PreTrainedTokenizerFast = AutoTokenizer.from_pretrained(tokenizer_name)
+    corag_agent: CoRagAgent = CoRagAgent(vllm_client=vllm_client, corpus=corpus, graph_api_url=args.graph_api_url, tokenizer=tokenizer)
     
-    tokenizer: PreTrainedTokenizerFast = AutoTokenizer.from_pretrained(model_id)
     tokenizer_lock: threading.Lock = threading.Lock()
 
     if args.max_path_length < 1:

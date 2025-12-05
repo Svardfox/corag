@@ -30,12 +30,16 @@ class CoRagAgent:
 
     def __init__(
             self, vllm_client: VllmClient, corpus: Dataset,
-            graph_api_url: Optional[str] = None
+            graph_api_url: Optional[str] = None,
+            tokenizer: Optional[PreTrainedTokenizerFast] = None
     ):
         self.vllm_client = vllm_client
         self.corpus = corpus
         self.graph_api_url = graph_api_url
-        self.tokenizer: PreTrainedTokenizerFast = AutoTokenizer.from_pretrained(vllm_client.model)
+        if tokenizer:
+            self.tokenizer = tokenizer
+        else:
+            self.tokenizer: PreTrainedTokenizerFast = AutoTokenizer.from_pretrained(vllm_client.model)
         self.lock = threading.Lock()
 
     def sample_path(
