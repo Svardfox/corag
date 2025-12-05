@@ -4,7 +4,7 @@ import torch
 from typing import List, Dict, Tuple
 from datasets import Dataset
 
-from search.simple_encoder import SimpleEncoder
+from .simple_encoder import SimpleEncoder
 from data_utils import load_corpus
 from logger_config import logger
 

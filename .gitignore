@@ -4,6 +4,7 @@ pycache/
 dist/
 build/
 venv/
+kgc/
 .env
 .env.*
 .vscode/
