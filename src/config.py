@@ -42,7 +42,7 @@ class Arguments(TrainingArguments):
     corpus_file: Optional[str] = field(default=None, metadata={'help': 'Path to the corpus file (json)'})
     vllm_api_base: str = field(default="http://localhost:8000/v1", metadata={'help': 'VLLM API base URL'})
     vllm_api_key: str = field(default="token-123", metadata={'help': 'VLLM API key'})
-    vllm_model: Optional[str] = field(default=None, metadata={'help': 'VLLM model name. If provided, skips auto-detection.'})
+    vllm_model: Optional[str] = field(default='', metadata={'help': 'VLLM model name. If provided, skips auto-detection.'})
     tokenizer_name: Optional[str] = field(default=None, metadata={'help': 'Tokenizer name or path. If not provided, uses the vLLM model ID.'})
 
     def __post_init__(self):
