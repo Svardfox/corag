@@ -17,6 +17,9 @@ from utils import batch_truncate
 
 
 def _normalize_subquery(subquery: str) -> str:
+    # Remove think blocks
+    subquery = re.sub(r'<think>.*?</think>', '', subquery, flags=re.DOTALL)
+
     subquery = subquery.strip()
     if subquery.startswith('"') and subquery.endswith('"'):
         subquery = subquery[1:-1]
