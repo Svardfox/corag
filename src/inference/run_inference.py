@@ -25,10 +25,10 @@ parser = HfArgumentParser((Arguments,))
 args: Arguments = parser.parse_args_into_dataclasses()[0]
 logger.info('Args={}'.format(str(args)))
 
-vllm_client: VllmClient = VllmClient(get_vllm_model_id())
+vllm_client: VllmClient = VllmClient(get_vllm_model_id(api_base=args.vllm_api_base, api_key=args.vllm_api_key), api_base=args.vllm_api_base, api_key=args.vllm_api_key)
 corpus: Dataset = load_corpus(args.corpus_file)
 corag_agent: CoRagAgent = CoRagAgent(vllm_client=vllm_client, corpus=corpus, graph_api_url=args.graph_api_url)
-tokenizer: PreTrainedTokenizerFast = AutoTokenizer.from_pretrained(get_vllm_model_id())
+tokenizer: PreTrainedTokenizerFast = AutoTokenizer.from_pretrained(get_vllm_model_id(api_base=args.vllm_api_base, api_key=args.vllm_api_key))
 tokenizer_lock: threading.Lock = threading.Lock()
 processed_cnt: AtomicCounter = AtomicCounter()
 total_cnt: int = 0
