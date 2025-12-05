@@ -5,8 +5,8 @@ from typing import List, Dict, Tuple
 from datasets import Dataset
 
 from .simple_encoder import SimpleEncoder
-from data_utils import load_corpus
-from logger_config import logger
+from src.data_utils import load_corpus
+from src.logger_config import logger
 
 
 def _get_all_shards_path(index_dir: str) -> List[str]:
