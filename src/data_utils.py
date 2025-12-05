@@ -4,7 +4,7 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 
 from typing import List, Dict, Optional
 from datasets import load_dataset, Dataset
-from openai.types.chat import ChatCompletion
+
 from contextlib import nullcontext
 from transformers import PreTrainedTokenizerFast
 from threading import Lock
@@ -59,8 +59,8 @@ def format_input_context(doc: Dict[str, str]) -> str:
     return f'{title}\n{contents}'.strip()
 
 
-def parse_answer_logprobs(response: ChatCompletion) -> List[float]:
-    prompt_logprobs: List[Dict] = response.prompt_logprobs[::-1]
+def parse_answer_logprobs(response: Dict) -> List[float]:
+    prompt_logprobs: List[Dict] = response['prompt_logprobs'][::-1]
 
     # Hacky: this only works for llama-3 models
     assert '128006' in prompt_logprobs[3], f"Invalid prompt logprobs: {prompt_logprobs}"

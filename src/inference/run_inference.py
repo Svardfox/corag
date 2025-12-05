@@ -18,7 +18,7 @@ from utils import save_json_to_file, AtomicCounter
 from agent import CoRagAgent, RagPath
 from inference.metrics import compute_metrics_dict
 
-logging.getLogger("openai").setLevel(logging.WARNING)
+
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 parser = HfArgumentParser((Arguments,))

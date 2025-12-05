@@ -17,7 +17,7 @@ from data_utils import load_corpus, format_documents_for_final_answer
 from vllm_client import VllmClient, get_vllm_model_id
 from agent import CoRagAgent, RagPath
 
-logging.getLogger("openai").setLevel(logging.WARNING)
+
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 def main():

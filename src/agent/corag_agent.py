@@ -4,7 +4,7 @@ import threading
 from copy import deepcopy
 from typing import Optional, List, Dict, Tuple
 from datasets import Dataset
-from openai.types.chat import ChatCompletion
+
 from transformers import AutoTokenizer, PreTrainedTokenizerFast
 
 from logger_config import logger
@@ -121,8 +121,8 @@ class CoRagAgent:
         )
         self._truncate_long_messages(messages, max_length=max_message_length)
 
-        completion: ChatCompletion = self.vllm_client.call_chat(messages=messages, return_str=False, n=int(1.5 * n), **kwargs)
-        subqueries: List[str] = [_normalize_subquery(c.message.content) for c in completion.choices]
+        completion: Dict = self.vllm_client.call_chat(messages=messages, return_str=False, n=int(1.5 * n), **kwargs)
+        subqueries: List[str] = [_normalize_subquery(c['message']['content']) for c in completion['choices']]
         subqueries = list(set(subqueries))[:n]
 
         return subqueries
@@ -251,7 +251,7 @@ class CoRagAgent:
         messages.append({'role': 'assistant', 'content': 'No relevant information found'})
         self._truncate_long_messages(messages, max_length=max_message_length)
 
-        response: ChatCompletion = self.vllm_client.call_chat(
+        response: Dict = self.vllm_client.call_chat(
             messages=messages,
             return_str=False,
             max_tokens=1,
