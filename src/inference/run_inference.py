@@ -62,8 +62,9 @@ def _generate_single_example(ex: Dict) -> Dict:
 
     documents: List[str] = format_documents_for_final_answer(
         args=args,
+        tokenizer=tokenizer,
         context_doc_ids=ex['context_doc_ids'],
-        tokenizer=tokenizer, corpus=corpus,
+        corpus=corpus,
         lock=tokenizer_lock
     )
 

@@ -96,12 +96,20 @@ def _apply_context_placement_strategy(context_placement: str, contexts: List[str
 
 def format_documents_for_final_answer(
         args: Arguments,
-        context_doc_ids: List[str],
-        tokenizer: PreTrainedTokenizerFast, corpus: Dataset,
+        tokenizer: PreTrainedTokenizerFast,
+        context_doc_ids: Optional[List[str]] = None,
+        corpus: Optional[Dataset] = None,
+        documents: Optional[List[str]] = None,
         lock: Optional[Lock] = None
 ) -> List[str]:
-    selected_doc_ids: List[str] = context_doc_ids[:args.num_contexts]
-    documents: List[str] = [format_input_context(corpus[int(doc_id)]) for doc_id in selected_doc_ids]
+    if documents is None:
+        if context_doc_ids and corpus:
+            selected_doc_ids: List[str] = context_doc_ids[:args.num_contexts]
+            documents: List[str] = [format_input_context(corpus[int(doc_id)]) for doc_id in selected_doc_ids]
+        else:
+            documents = []
+    else:
+        documents = documents[:args.num_contexts]
 
     max_per_ctx_length: int = int(args.max_len / max(args.num_contexts, 1) * 1.2)
     with nullcontext() if lock is None else lock:

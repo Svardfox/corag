@@ -34,7 +34,11 @@ def main():
     vllm_client: VllmClient = VllmClient(model=model_id, api_base=args.vllm_api_base, api_key=args.vllm_api_key)
     
     logger.info("Loading Corpus...")
-    corpus: Dataset = load_corpus(args.corpus_file)
+    if args.corpus_file:
+        corpus: Dataset = load_corpus(args.corpus_file)
+    else:
+        logger.info("No corpus file provided. Skipping corpus loading.")
+        corpus = None
     
     logger.info("Initializing Agent...")
     corag_agent: CoRagAgent = CoRagAgent(vllm_client=vllm_client, corpus=corpus, graph_api_url=args.graph_api_url)
@@ -114,18 +118,20 @@ def main():
             # Looking at corag_agent.py, sample_path returns a RagPath with past_doc_ids.
             # We should flatten all doc ids from the path for the final answer context.
             
-            all_doc_ids = []
-            if path.past_doc_ids:
-                for ids in path.past_doc_ids:
-                    all_doc_ids.extend(ids)
+            all_documents = []
+            if path.past_documents:
+                for docs in path.past_documents:
+                    all_documents.extend(docs)
+            
             # Remove duplicates while preserving order
             seen = set()
-            unique_doc_ids = [x for x in all_doc_ids if not (x in seen or seen.add(x))]
+            unique_documents = [x for x in all_documents if not (x in seen or seen.add(x))]
 
             documents = format_documents_for_final_answer(
                 args=args,
-                context_doc_ids=unique_doc_ids,
-                tokenizer=tokenizer, corpus=corpus,
+                tokenizer=tokenizer,
+                corpus=corpus,
+                documents=unique_documents,
                 lock=tokenizer_lock
             )
 
