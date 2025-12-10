@@ -9,3 +9,4 @@ kgc/
 .env.*
 .vscode/
 .DS_Store
+*.pdf
