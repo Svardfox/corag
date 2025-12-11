@@ -6,7 +6,7 @@ from tqdm import tqdm
 from datasets import load_dataset
 
 # Add src to path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../")))
 from search.search_utils import search_by_graph_api
 
 def prepare_data(args):
