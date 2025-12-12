@@ -40,6 +40,8 @@ def prepare_data(args):
                     results = search_by_graph_api(sq, args.graph_api_url)
                     # Format docs (simple concatenation or structured)
                     docs_text = ""
+                    if isinstance(results, dict):
+                        results = results['chunks']
                     for i, res in enumerate(results[:args.top_k]):
                         if isinstance(res, str):
                             content = res
