@@ -17,7 +17,7 @@ from transformers import (
 
 # Add src to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
-from config import Arguments
+from src.config import Arguments
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

@@ -17,6 +17,11 @@ class Arguments(TrainingArguments):
         default='hotpotqa',
         metadata={'help': 'evaluation task'}
     )
+    remove_unused_columns: Optional[bool] = field(
+        default=False,
+        metadata={'help': 'Remove columns not required by the model when using an nlp.Dataset.'}
+    )
+
     eval_split: str = field(
         default='validation',
         metadata={'help': 'evaluation split'}
