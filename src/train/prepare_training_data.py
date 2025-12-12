@@ -11,6 +11,67 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../"
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
 from search.search_utils import search_by_graph_api
 
+import concurrent.futures
+
+def process_example(example, args):
+    # Initial User Query
+    conversation = [
+        {"role": "user", "content": example['query']}
+    ]
+    
+    subqueries = example.get('subqueries', [])
+    subanswers = example.get('subanswers', [])
+    
+    # Interleave sub-steps
+    for sq, sa in zip(subqueries, subanswers):
+        # 1. Model generates SubQuery -> Add to conversation (Assistant)
+        conversation.append({"role": "assistant", "content": f"SubQuery: {sq}"})
+        
+        # 2. Retrieve Documents (System/Observation)
+        if args.retrieve:
+            # Call Graph API
+            try:
+                results = search_by_graph_api(sq, args.graph_api_url)
+                # Handle case where API returns a dict (e.g. {"data": [...]}) instead of list
+                if isinstance(results, dict):
+                    # Try to find a list in common keys
+                    for key in ['data', 'results', 'docs', 'passages']:
+                        if key in results and isinstance(results[key], list):
+                            results = results[key]
+                            break
+                    else:
+                        results = [results] if results else []
+                elif not isinstance(results, list):
+                    results = []
+                    
+                # Format docs (simple concatenation or structured)
+                docs_text = ""
+                for i, res in enumerate(results[:args.top_k]):
+                    if isinstance(res, str):
+                        content = res
+                    else:
+                        content = res.get('contents') or res.get('content') or res.get('text') or str(res)
+                    docs_text += f"Doc {i+1}: {content}\n"
+                
+                if not docs_text:
+                    docs_text = "No relevant information found."
+            except Exception as e:
+                print(f"Retrieval failed for {sq}: {e}")
+                docs_text = "Retrieval failed."
+        else:
+            docs_text = "[Retrieval Skipped in Dry Run]"
+
+        conversation.append({"role": "observation", "content": f"Retrieved Context:\n{docs_text}"})
+        
+        # 3. Model generates SubAnswer -> Add to conversation (Assistant)
+        conversation.append({"role": "assistant", "content": f"SubAnswer: {sa}"})
+
+    # Final Answer
+    final_answer = example['answers'][0] if example['answers'] else ""
+    conversation.append({"role": "assistant", "content": f"Final Answer: {final_answer}"})
+    
+    return {"messages": conversation}
+
 def prepare_data(args):
     # Load dataset
     print(f"Loading dataset {args.dataset}, split {args.split}...")
@@ -18,55 +79,20 @@ def prepare_data(args):
     
     output_data = []
     
-    for example in tqdm(ds, desc="Processing examples"):
-        # Initial User Query
-        conversation = [
-            {"role": "user", "content": example['query']}
-        ]
+    print(f"Starting processing with {args.num_workers} workers...")
+    
+    # Use ThreadPoolExecutor for parallelism
+    with concurrent.futures.ThreadPoolExecutor(max_workers=args.num_workers) as executor:
+        # Map process_example to each item in the dataset
+        # Use simple lambda or partial to pass args
+        futures = {executor.submit(process_example, ex, args): i for i, ex in enumerate(ds)}
         
-        subqueries = example.get('subqueries', [])
-        subanswers = example.get('subanswers', [])
-        
-        # Interleave sub-steps
-        for sq, sa in zip(subqueries, subanswers):
-            # 1. Model generates SubQuery -> Add to conversation (Assistant)
-            conversation.append({"role": "assistant", "content": f"SubQuery: {sq}"})
-            
-            # 2. Retrieve Documents (System/Observation)
-            if args.retrieve:
-                # Call Graph API
-                # print(f"Retrieving for: {sq}") # verbose
-                try:
-                    results = search_by_graph_api(sq, args.graph_api_url)
-                    # Format docs (simple concatenation or structured)
-                    docs_text = ""
-                    if isinstance(results, dict):
-                        results = results['chunks']
-                    for i, res in enumerate(results[:args.top_k]):
-                        if isinstance(res, str):
-                            content = res
-                        else:
-                            content = res.get('contents') or res.get('content') or res.get('text') or str(res)
-                        docs_text += f"Doc {i+1}: {content}\n"
-                    
-                    if not docs_text:
-                        docs_text = "No relevant information found."
-                except Exception as e:
-                    print(f"Retrieval failed for {sq}: {e}")
-                    docs_text = "Retrieval failed."
-            else:
-                docs_text = "[Retrieval Skipped in Dry Run]"
-
-            conversation.append({"role": "observation", "content": f"Retrieved Context:\n{docs_text}"})
-            
-            # 3. Model generates SubAnswer -> Add to conversation (Assistant)
-            conversation.append({"role": "assistant", "content": f"SubAnswer: {sa}"})
-
-        # Final Answer
-        final_answer = example['answers'][0] if example['answers'] else ""
-        conversation.append({"role": "assistant", "content": f"Final Answer: {final_answer}"})
-        
-        output_data.append({"messages": conversation})
+        for future in tqdm(concurrent.futures.as_completed(futures), total=len(ds), desc="Processing examples"):
+            try:
+                result = future.result()
+                output_data.append(result)
+            except Exception as e:
+                print(f"Error processing example: {e}")
 
     # Save to file
     os.makedirs(os.path.dirname(args.output_file), exist_ok=True)
@@ -85,6 +111,7 @@ if __name__ == "__main__":
     parser.add_argument("--graph_api_url", type=str, default="http://localhost:8023/retrieve")
     parser.add_argument("--retrieve", action="store_true", help="Whether to perform actual retrieval")
     parser.add_argument("--top_k", type=int, default=3)
+    parser.add_argument("--num_workers", type=int, default=16, help="Number of concurrent threads for retrieval")
     
     args = parser.parse_args()
     prepare_data(args)
