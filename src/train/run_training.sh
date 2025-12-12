@@ -17,8 +17,10 @@ torchrun --nproc_per_node 8 src/train/train.py \
     --train_file data/train_with_graph_retrieval.jsonl \
     --output_dir output/corag_qwen_finetuned \
     --num_train_epochs 3 \
-    --per_device_train_batch_size 4 \
-    --gradient_accumulation_steps 2 \
+    --per_device_train_batch_size 1 \
+    --gradient_accumulation_steps 8 \
+    --gradient_checkpointing True \
+    --deepspeed src/train/ds_config_zero3.json \
     --learning_rate 2e-5 \
     --max_len 4096 \
     --do_train \
