@@ -7,6 +7,8 @@ from datasets import load_dataset
 
 # Add src to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../")))
+# Add project root to path (for imports like 'from src.xxx import yyy')
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
 from search.search_utils import search_by_graph_api
 
 def prepare_data(args):
