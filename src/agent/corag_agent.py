@@ -16,7 +16,11 @@ from agent.agent_utils import RagPath
 from utils import batch_truncate
 
 
-def _normalize_subquery(subquery: str) -> str:
+def _normalize_subquery(subquery: str) -> Tuple[str, Optional[str]]:
+    # Extract think blocks
+    thought_match = re.search(r'<think>(.*?)</think>', subquery, flags=re.DOTALL)
+    thought = thought_match.group(1).strip() if thought_match else None
+    
     # Remove think blocks
     subquery = re.sub(r'<think>.*?</think>', '', subquery, flags=re.DOTALL)
 
@@ -26,7 +30,7 @@ def _normalize_subquery(subquery: str) -> str:
     if subquery.startswith('Intermediate query'):
         subquery = re.sub(r'^Intermediate query \d+: ', '', subquery)
 
-    return subquery
+    return subquery, thought
 
 
 class CoRagAgent:
@@ -56,9 +60,12 @@ class CoRagAgent:
         past_subanswers: List[str] = kwargs.pop('past_subanswers', [])
         past_doc_ids: List[List[str]] = kwargs.pop('past_doc_ids', [])
         past_documents: List[List[str]] = kwargs.pop('past_documents', [])
+        past_thoughts: List[str] = kwargs.pop('past_thoughts', [])
         assert len(past_subqueries) == len(past_subanswers) == len(past_doc_ids)
         if past_documents:
             assert len(past_documents) == len(past_doc_ids)
+        if past_thoughts:
+            assert len(past_thoughts) == len(past_subqueries)
 
         subquery_temp: float = temperature
         num_llm_calls: int = 0
@@ -73,8 +80,8 @@ class CoRagAgent:
             )
             self._truncate_long_messages(messages, max_length=max_message_length)
 
-            subquery: str = self.vllm_client.call_chat(messages=messages, temperature=subquery_temp, **kwargs)
-            subquery = _normalize_subquery(subquery)
+            subquery_raw: str = self.vllm_client.call_chat(messages=messages, temperature=subquery_temp, **kwargs)
+            subquery, thought = _normalize_subquery(subquery_raw)
 
             if subquery in past_subqueries:
                 subquery_temp = max(subquery_temp, 0.7)
@@ -89,6 +96,7 @@ class CoRagAgent:
             past_subanswers.append(subanswer)
             past_doc_ids.append(doc_ids)
             past_documents.append(documents)
+            past_thoughts.append(thought)
 
         return RagPath(
             query=query,
@@ -96,6 +104,7 @@ class CoRagAgent:
             past_subanswers=past_subanswers,
             past_doc_ids=past_doc_ids,
             past_documents=past_documents,
+            past_thoughts=past_thoughts,
         )
 
     def generate_final_answer(
@@ -134,7 +143,9 @@ class CoRagAgent:
         self._truncate_long_messages(messages, max_length=max_message_length)
 
         completion: Dict = self.vllm_client.call_chat(messages=messages, return_str=False, n=int(1.5 * n), **kwargs)
-        subqueries: List[str] = [_normalize_subquery(c['message']['content']) for c in completion['choices']]
+        # We process the subqueries to extract thoughts but sample_subqueries only returns the query strings
+        subqueries_and_thoughts: List[Tuple[str, str]] = [_normalize_subquery(c['message']['content']) for c in completion['choices']]
+        subqueries: List[str] = [s[0] for s in subqueries_and_thoughts]
         subqueries = list(set(subqueries))[:n]
 
         return subqueries
@@ -216,7 +227,7 @@ class CoRagAgent:
             expand_size: int = 4, num_rollouts: int = 2, beam_size: int = 1,
             **kwargs
     ) -> RagPath:
-        candidates: List[RagPath] = [RagPath(query=query, past_subqueries=[], past_subanswers=[], past_doc_ids=[], past_documents=[])]
+        candidates: List[RagPath] = [RagPath(query=query, past_subqueries=[], past_subanswers=[], past_doc_ids=[], past_documents=[], past_thoughts=[])]
         for step in range(max_path_length):
             new_candidates: List[RagPath] = []
             for candidate in candidates:
@@ -227,8 +238,16 @@ class CoRagAgent:
                     n=expand_size, temperature=temperature, max_message_length=max_message_length
                 )
                 for subquery in new_subqueries:
+                    # NOTE: sample_subqueries discards thoughts for now as it returns a list of strings.
+                    # This might need adjustment if we want to keep thoughts in tree search too. 
+                    # For now just use None or empty string for thought in tree search candidates being expanded from list.
+                    # But wait, sample_subqueries just returns content, we'd need to change its signature to return thoughts too if we want them here.
+                    # But sample_subqueries logic above was changed to just return strings.
+                    # Let's see if we can at least support the structure.
+                    
                     new_candidate: RagPath = deepcopy(candidate)
                     new_candidate.past_subqueries.append(subquery)
+                    new_candidate.past_thoughts.append(None) # Metadata lost in sample_subqueries for now
                     subanswer, doc_ids, documents = self._get_subanswer_and_doc_ids(
                         subquery=subquery, max_message_length=max_message_length
                     )
@@ -296,6 +315,7 @@ class CoRagAgent:
                 past_subanswers=deepcopy(path.past_subanswers),
                 past_doc_ids=deepcopy(path.past_doc_ids),
                 past_documents=deepcopy(path.past_documents),
+                past_thoughts=deepcopy(path.past_thoughts),
             )
             rollout_paths.append(rollout_path)
 

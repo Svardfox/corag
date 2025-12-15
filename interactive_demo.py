@@ -102,6 +102,8 @@ def main():
                 print("\n--- Intermediate Steps ---")
                 for i, (sq, sa) in enumerate(zip(path.past_subqueries, path.past_subanswers)):
                     print(f"Step {i+1}:")
+                    if path.past_thoughts and i < len(path.past_thoughts) and path.past_thoughts[i]:
+                        print(f"  Thought: {path.past_thoughts[i]}")
                     print(f"  Query: {sq}")
                     print(f"  Answer: {sa}")
                     if path.past_doc_ids and i < len(path.past_doc_ids):
