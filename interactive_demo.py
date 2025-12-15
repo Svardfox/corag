@@ -33,6 +33,13 @@ def main():
     
     vllm_client: VllmClient = VllmClient(model=model_id, api_base=args.vllm_api_base, api_key=args.vllm_api_key)
     
+    final_vllm_client: VllmClient = None
+    if args.final_answer_model:
+        logger.info(f"Initializing Final Answer VLLM Client ({args.final_answer_model})...")
+        final_api_base = args.final_answer_api_base if args.final_answer_api_base else args.vllm_api_base
+        final_api_key = args.final_answer_api_key if args.final_answer_api_key else args.vllm_api_key
+        final_vllm_client = VllmClient(model=args.final_answer_model, api_base=final_api_base, api_key=final_api_key)
+    
     logger.info("Loading Corpus...")
     if args.corpus_file:
         corpus: Dataset = load_corpus(args.corpus_file)
@@ -50,7 +57,14 @@ def main():
             sys.exit(1)
         else:
             raise e
-    corag_agent: CoRagAgent = CoRagAgent(vllm_client=vllm_client, corpus=corpus, graph_api_url=args.graph_api_url, tokenizer=tokenizer)
+            raise e
+    corag_agent: CoRagAgent = CoRagAgent(
+        vllm_client=vllm_client, 
+        corpus=corpus, 
+        graph_api_url=args.graph_api_url, 
+        tokenizer=tokenizer,
+        final_vllm_client=final_vllm_client
+    )
     
     tokenizer_lock: threading.Lock = threading.Lock()
 

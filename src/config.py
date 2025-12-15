@@ -49,6 +49,10 @@ class Arguments(TrainingArguments):
     vllm_api_key: str = field(default="token-123", metadata={'help': 'VLLM API key'})
     vllm_model: Optional[str] = field(default='', metadata={'help': 'VLLM model name. If provided, skips auto-detection.'})
     tokenizer_name: Optional[str] = field(default=None, metadata={'help': 'Tokenizer name or path. If not provided, uses the vLLM model ID.'})
+    
+    final_answer_model: Optional[str] = field(default=None, metadata={'help': 'Model ID for final answer generation.'})
+    final_answer_api_base: Optional[str] = field(default=None, metadata={'help': 'API base URL for final answer model.'})
+    final_answer_api_key: Optional[str] = field(default=None, metadata={'help': 'API key for final answer model.'})
 
     def __post_init__(self):
         super(Arguments, self).__post_init__()

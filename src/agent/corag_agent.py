@@ -38,9 +38,11 @@ class CoRagAgent:
     def __init__(
             self, vllm_client: VllmClient, corpus: Dataset,
             graph_api_url: Optional[str] = None,
-            tokenizer: Optional[PreTrainedTokenizerFast] = None
+            tokenizer: Optional[PreTrainedTokenizerFast] = None,
+            final_vllm_client: Optional[VllmClient] = None
     ):
         self.vllm_client = vllm_client
+        self.final_vllm_client = final_vllm_client
         self.corpus = corpus
         self.graph_api_url = graph_api_url
         if tokenizer:
@@ -121,7 +123,10 @@ class CoRagAgent:
         )
         self._truncate_long_messages(messages, max_length=max_message_length)
 
-        return self.vllm_client.call_chat(messages=messages, **kwargs)
+        self._truncate_long_messages(messages, max_length=max_message_length)
+
+        client = self.final_vllm_client if self.final_vllm_client else self.vllm_client
+        return client.call_chat(messages=messages, **kwargs)
 
     def _truncate_long_messages(self, messages: List[Dict], max_length: int):
         for msg in messages:
