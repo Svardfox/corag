@@ -57,7 +57,8 @@ def run_custom_eval(args: Arguments):
         raise e
         
     corag_agent: CoRagAgent = CoRagAgent(vllm_client=vllm_client, corpus=corpus, graph_api_url=args.graph_api_url, tokenizer=tokenizer)
-    tokenizer_lock: threading.Lock = threading.Lock()
+    # Use the same lock as the agent to ensure thread safety for tokenizer access
+    tokenizer_lock: threading.Lock = corag_agent.lock
 
     if args.max_path_length < 1:
         args.decode_strategy = 'greedy'
