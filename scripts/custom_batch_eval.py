@@ -161,9 +161,7 @@ def run_custom_eval(args: Arguments):
                 tokenizer=tokenizer,
                 corpus=corpus,
                 documents=unique_documents,
-                lock=None # We are already holding the lock here, passing None to avoid double locking if internal fun supports it, or just let it lock/unlock if reentrant. 
-                # Wait, format_documents_for_final_answer takes a 'lock' arg.
-                # Let's check data_utils.py to see how it uses the lock.
+                lock=None # The lock is already held outside this call
             )
 
         # 3. Final Answer Generation
@@ -185,9 +183,7 @@ def run_custom_eval(args: Arguments):
             logger.info(f"Processed {processed_cnt.value} / {total_cnt}")
 
         # Construct result dict
-        # Map timing to user requested format approximately:
-        # [q2t (N/A), ppr (N/A), reranker (path_generation), llm_call (final_generation)]
-        # We'll just put 0 for the first two as we don't have those specific steps.
+        # Custom metrics if available (Q2T, PPR not captured here)
         time_breakdown = [0.0, 0.0, path_gen_time, final_gen_time]
 
         result_item = {
@@ -208,9 +204,8 @@ def run_custom_eval(args: Arguments):
         
         return result_item
 
-    # Use ThreadPoolExecutor for parallel processing if configured
-    # Note: vLLM client handles concurrency well, but Python GIL might be a bottleneck.
-    # Adjust num_threads in args.
+    # Use ThreadPoolExecutor for parallel processing
+    # Note: Adjust num_threads in args based on system capabilities
     logger.info(f"Processing {total_cnt} items with {args.num_threads} threads...")
     
     processed_results = []
@@ -287,31 +282,12 @@ def run_custom_eval(args: Arguments):
 
 if __name__ == "__main__":
     parser = HfArgumentParser((Arguments,))
-    # We allow loose parsing in case user passes extra args
+    # Parse known args, allowing for extra args that might be handled differently
     args, unknown = parser.parse_args_into_dataclasses(return_remaining_strings=True)
     if unknown:
         logger.warning(f"Unknown arguments: {unknown}")
     
-    # User might pass args not in our Arguments dataclass via command line for their own script logic,
-    # but here we rely on Arguments.
-    # However, Arguments dataclass defines 'eval_file' and 'graph_api_url' etc?
-    # Let's check config.py to ensure 'eval_file' is there or if we need to add it.
-    # Based on run_inference.py, it uses args.output_dir and args.eval_task/split.
-    # Ideally I should add 'eval_file' and 'save_file' to Arguments or parse them separately.
-    # Since I cannot modify config.py easily without knowing if it breaks things, I will just add them 
-    # to parser manually if they are not in Arguments, or use a separate argparse for them.
-    # BUT HfArgumentParser is tricky with mix.
-    # Let's try to see if I can just use argparse for the file paths and HfArgumentParser for the rest?
-    # No, that's messy.
-    # Better approach: check if 'eval_file' is in Arguments. If not, I'll access it from sys.argv manually or 
-    # add a temporary argument class.
-    
-    # Actually, looking at the user's request, they want to reuse existing logic.
-    # I will assume standard args are passed. But wait, Arguments class usually defines model args.
-    # I will check if I can just add my own args.
-    
-    # To be safe and avoid conflict, I will create a small dataclass for my script specific args
-    # and merge it.
+    # Define script-specific arguments separate from the main configuration
     from dataclasses import dataclass, field
     
     @dataclass
@@ -322,9 +298,7 @@ if __name__ == "__main__":
     parser = HfArgumentParser((Arguments, ScriptArguments))
     args, script_args = parser.parse_args_into_dataclasses()
     
-    # Merge script_args into args for convenience if needed, or just pass both.
-    # Actually run_custom_eval needs both. Let's start by attaching script_args fields to args object 
-    # or just pass them explicitly.
+    # Merge script arguments into the main arguments object
     args.eval_file = script_args.eval_file
     args.save_file = script_args.save_file
     

@@ -38,9 +38,9 @@ class ChainOfRagCollator:
             input_ids = []
             labels = []
             
-            # Simple manual ChatML-like formatting to ensure control over masking
-            # (Note: For production, align this exactly with the model's actual chat template)
-            # Qwen/ChatML format: <|im_start|>role\ncontent<|im_end|>\n
+            # Manual ChatML formatting
+            # TODO: Use the model's official chat template in production
+            # Format: <|im_start|>role\ncontent<|im_end|>\n
             
             for msg in messages:
                 role = msg["role"]
@@ -71,9 +71,7 @@ class ChainOfRagCollator:
                 
                 # Label Masking
                 if role == "assistant":
-                    # Train on Assistant Content ONLY (excluding header/footer usually, or including?)
-                    # Usually we mask header, train on content + footer (EOS)
-                    # Let's mask header
+                    # Mask the header, train on content + footer (EOS)
                     part_labels = [-100] * len(header_ids) + content_ids + footer_ids
                 else:
                     # Mask User / System / Observation
@@ -83,8 +81,7 @@ class ChainOfRagCollator:
             
             # Truncate / Pad
             if len(input_ids) > self.max_len:
-                # Truncate from left or right? Usually left for chat to keep latest context, 
-                # but standard is right. Let's do simple truncation for now.
+                # Truncate to max_len
                 input_ids = input_ids[:self.max_len]
                 labels = labels[:self.max_len]
             

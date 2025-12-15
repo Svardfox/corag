@@ -13,3 +13,4 @@ kgc/
 *.pdf
 data/
 eval/
+output/

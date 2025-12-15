@@ -243,16 +243,9 @@ class CoRagAgent:
                     n=expand_size, temperature=temperature, max_message_length=max_message_length
                 )
                 for subquery in new_subqueries:
-                    # NOTE: sample_subqueries discards thoughts for now as it returns a list of strings.
-                    # This might need adjustment if we want to keep thoughts in tree search too. 
-                    # For now just use None or empty string for thought in tree search candidates being expanded from list.
-                    # But wait, sample_subqueries just returns content, we'd need to change its signature to return thoughts too if we want them here.
-                    # But sample_subqueries logic above was changed to just return strings.
-                    # Let's see if we can at least support the structure.
-                    
                     new_candidate: RagPath = deepcopy(candidate)
                     new_candidate.past_subqueries.append(subquery)
-                    new_candidate.past_thoughts.append(None) # Metadata lost in sample_subqueries for now
+                    new_candidate.past_thoughts.append(None) # Thoughts are not currently captured in tree search expansion
                     subanswer, doc_ids, documents = self._get_subanswer_and_doc_ids(
                         subquery=subquery, max_message_length=max_message_length
                     )

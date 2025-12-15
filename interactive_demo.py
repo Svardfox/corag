@@ -134,21 +134,14 @@ def main():
             # 2. Document Formatting
             documents: List[str] = format_documents_for_final_answer(
                 args=args,
-                context_doc_ids=path.past_doc_ids[-1] if path.past_doc_ids else [], # Use last step's docs or empty? 
-                # Note: original logic uses ex['context_doc_ids'] which usually comes from retrieval.
-                # In CoRAG loop, past_doc_ids stores docs for each step.
-                # format_documents_for_final_answer expects a list of doc_ids.
-                # Let's collect ALL unique doc ids encountered in the path for the final answer
+                context_doc_ids=path.past_doc_ids[-1] if path.past_doc_ids else [], 
+                # In the CoRAG loop, we collect all unique document IDs encountered in the path
+                # to serve as context for the final answer.
                 tokenizer=tokenizer, corpus=corpus,
                 lock=tokenizer_lock
             )
             
-            # Correction: In run_inference.py, ex['context_doc_ids'] is used. 
-            # But in the agent loop, we generate new docs.
-            # The original run_inference logic seems to rely on pre-retrieved docs in the dataset for 'context_doc_ids' 
-            # OR it expects the agent to return them.
-            # Looking at corag_agent.py, sample_path returns a RagPath with past_doc_ids.
-            # We should flatten all doc ids from the path for the final answer context.
+            # Flatten all doc IDs from the path for the final answer context.
             
             all_documents = []
             if path.past_documents:
