@@ -41,6 +41,20 @@ def run_custom_eval(args: Arguments):
     
     vllm_client: VllmClient = VllmClient(model=model_id, api_base=args.vllm_api_base, api_key=args.vllm_api_key)
     
+    final_vllm_client: VllmClient = None
+    if args.final_answer_model or args.final_answer_api_base:
+        final_api_base = args.final_answer_api_base if args.final_answer_api_base else args.vllm_api_base
+        final_api_key = args.final_answer_api_key if args.final_answer_api_key else args.vllm_api_key
+        
+        if args.final_answer_model:
+            final_model_id = args.final_answer_model
+        else:
+             logger.info(f"Auto-detecting Final Answer Model from {final_api_base}...")
+             final_model_id = get_vllm_model_id(api_base=final_api_base, api_key=final_api_key)
+
+        logger.info(f"Initializing Final Answer VLLM Client ({final_model_id})...")
+        final_vllm_client = VllmClient(model=final_model_id, api_base=final_api_base, api_key=final_api_key)
+    
     logger.info("Loading Corpus...")
     corpus = None
     if args.corpus_file:
@@ -56,7 +70,13 @@ def run_custom_eval(args: Arguments):
         logger.error(f"Failed to load tokenizer from '{tokenizer_name}'.")
         raise e
         
-    corag_agent: CoRagAgent = CoRagAgent(vllm_client=vllm_client, corpus=corpus, graph_api_url=args.graph_api_url, tokenizer=tokenizer)
+    corag_agent: CoRagAgent = CoRagAgent(
+        vllm_client=vllm_client, 
+        corpus=corpus, 
+        graph_api_url=args.graph_api_url, 
+        tokenizer=tokenizer,
+        final_vllm_client=final_vllm_client
+    )
     # Use the same lock as the agent to ensure thread safety for tokenizer access
     tokenizer_lock: threading.Lock = corag_agent.lock
 
