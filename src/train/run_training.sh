@@ -26,6 +26,6 @@ torchrun --nproc_per_node 8 src/train/train.py \
     --do_train \
     --save_steps 500 \
     --logging_steps 10 \
-    --report_to none \
+    --report_to wandb \
     --bf16 True \
     --overwrite_output_dir
