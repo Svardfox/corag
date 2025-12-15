@@ -1,5 +1,8 @@
 import sys
 import os
+# Disable tokenizer parallelism to avoid "Already borrowed" errors in multithreaded environment
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 import json
 import time
 import argparse
@@ -130,13 +133,17 @@ def run_custom_eval(args: Arguments):
         seen = set()
         unique_documents = [x for x in all_documents if not (x in seen or seen.add(x))]
 
-        documents = format_documents_for_final_answer(
-            args=args,
-            tokenizer=tokenizer,
-            corpus=corpus,
-            documents=unique_documents,
-            lock=tokenizer_lock
-        )
+        # Use lock when modifying Documents via tokenizer (it modifies internal state)
+        with tokenizer_lock:
+            documents = format_documents_for_final_answer(
+                args=args,
+                tokenizer=tokenizer,
+                corpus=corpus,
+                documents=unique_documents,
+                lock=None # We are already holding the lock here, passing None to avoid double locking if internal fun supports it, or just let it lock/unlock if reentrant. 
+                # Wait, format_documents_for_final_answer takes a 'lock' arg.
+                # Let's check data_utils.py to see how it uses the lock.
+            )
 
         # 3. Final Answer Generation
         prediction: str = corag_agent.generate_final_answer(

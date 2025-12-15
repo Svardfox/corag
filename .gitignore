@@ -11,3 +11,5 @@ kgc/
 .DS_Store
 kgc/
 *.pdf
+data/
+eval/
