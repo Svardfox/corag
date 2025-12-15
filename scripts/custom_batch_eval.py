@@ -10,7 +10,7 @@ import copy
 import logging
 import threading
 from typing import List, Dict, Any
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 
 # Add src to sys.path
@@ -195,17 +195,30 @@ def run_custom_eval(args: Arguments):
     
     processed_results = []
     
+    # Use a dictionary to store results by index to preserve order
+    results_map = {}
+    
     with ThreadPoolExecutor(max_workers=args.num_threads) as executor:
-        futures = [executor.submit(process_item, item) for item in data_items]
-        for future in tqdm(futures, total=total_cnt, desc="Processing"):
+        # Submit all tasks and map future to index
+        future_to_index = {executor.submit(process_item, item): i for i, item in enumerate(data_items)}
+        
+        # Use as_completed so tqdm updates as soon as ANY thread finishes
+        for future in tqdm(as_completed(future_to_index), total=total_cnt, desc="Processing"):
+            index = future_to_index[future]
             try:
                 res = future.result()
                 if res:
-                    processed_results.append(res)
+                    results_map[index] = res
             except Exception as e:
-                logger.error(f"Error processing item: {e}")
+                logger.error(f"Error processing item at index {index}: {e}")
                 import traceback
                 traceback.print_exc()
+
+    # Reconstruct results in original order
+    processed_results = []
+    for i in range(len(data_items)):
+        if i in results_map:
+            processed_results.append(results_map[i])
 
     # Calculate average stats
     total_q2t = 0
