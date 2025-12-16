@@ -9,7 +9,7 @@ import argparse
 import copy
 import logging
 import threading
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 
@@ -76,13 +76,30 @@ def check_hit(retrieved_docs: List[str], golden_facts: List[str]) -> Tuple[int, 
             
     return hits, len(golden_facts)
 
+def split_sentences(text: str) -> List[str]:
+    """Split text into sentences using punctuation (.?!) followed by whitespace."""
+    # Split after .?! followed by whitespace
+    return [s.strip() for s in re.split(r'(?<=[.?!])\s+', text) if s.strip()]
+
 def get_golden_facts(item: Dict[str, Any]) -> List[str]:
     """
-    Parse HotpotQA-like item to extract golden facts (supporting_facts -> context).
-    item structure:
-      "context": [ [title, [sent0, sent1...]], ... ]
-      "supporting_facts": [ [title, sent_index], ... ]
+    Parse item to extract golden facts.
+    Supports:
+    1. MuSiQue: "paragraphs" list with "is_supporting" flag -> split into sentences.
+    2. HotpotQA: "context" and "supporting_facts" -> extract specific sentences.
     """
+    # 1. MuSiQue Check
+    if 'paragraphs' in item:
+        facts = []
+        for p in item['paragraphs']:
+            if p.get('is_supporting'):
+                text = p.get('paragraph_text', '')
+                if text:
+                    sentences = split_sentences(text)
+                    facts.extend(sentences)
+        return facts
+
+    # 2. HotpotQA Logic (Fallback)
     context = item.get('context', [])
     supporting_facts = item.get('supporting_facts', [])
     
