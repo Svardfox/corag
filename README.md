@@ -1,8 +1,15 @@
 # CoRAG (Chain-of-Retrieval Augmented Generation)
 
-The training data, model, and evaluation code for the paper [Chain-of-Retrieval Augmented Generation](https://arxiv.org/abs/2501.14342).
+This repository is derived from the original [CoRAG repository](https://github.com/microsoft/CoRAG), which provides the training data, model, and evaluation code for the paper [Chain-of-Retrieval Augmented Generation](https://arxiv.org/abs/2501.14342).
 
-![CoRAG Framework](images/corag_framework.png) 
+## Main Enhancements
+
+Based on the original paper's methodology, this fork adds:
+
+- **Training Scripts**: Full fine-tuning scripts with Chain-of-RAG masking strategy (see `src/train/`)
+- **Dataset Construction Scripts**: Data preparation pipeline that includes context retrieval via Graph API (see `src/train/prepare_training_data.py`)
+
+![CoRAG Framework](images/corag_framework.png)
 
 ## Available Data
 
@@ -24,6 +31,45 @@ The training data, model, and evaluation code for the paper [Chain-of-Retrieval 
 ```
 pip install -r requirements.txt
 ```
+
+## Training
+
+This repository includes comprehensive training scripts for fine-tuning models with the CoRAG methodology. The training process consists of two main steps:
+
+### 1. Dataset Preparation with Context Retrieval
+
+The `prepare_training_data.py` script converts datasets into training format with real-time context retrieval:
+
+```bash
+python3 src/train/prepare_training_data.py \
+    --dataset corag/multihopqa \
+    --task 2wikimultihopqa \
+    --output_file data/train_with_graph_retrieval.jsonl \
+    --retrieve \
+    --top_k 3 \
+    --graph_api_url http://localhost:8023/retrieve
+```
+
+**Key Features:**
+- Real-time retrieval of relevant documents via Graph API for each sub-query
+- Configurable top-k document selection
+- Support for multiple datasets (2wikimultihopqa, hotpotqa, musique, bamboogle)
+
+### 2. Model Fine-tuning
+
+The `train.py` script implements full fine-tuning with Chain-of-RAG masking strategy:
+
+```bash
+bash src/train/run_training.sh
+```
+
+**Training Characteristics:**
+- **Loss Computation**: Applied to SubQuery, SubAnswer, and Final Answer (model's reasoning)
+- **Masked (No Loss)**: User Query and Retrieved Context (external inputs)
+- Supports DeepSpeed ZeRO-3 for distributed training
+- Compatible with Qwen, Llama, and other instruction-tuned models
+
+For detailed training parameters and configuration, see [src/train/README.md](src/train/README.md).
 
 ## How to Run
 
