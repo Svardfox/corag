@@ -1,6 +1,6 @@
 # CoRAG (Chain-of-Retrieval Augmented Generation)
 
-This repository is derived from the original [CoRAG repository](https://github.com/microsoft/CoRAG), which provides the training data, model, and evaluation code for the paper [Chain-of-Retrieval Augmented Generation](https://arxiv.org/abs/2501.14342).
+This repository is derived from the original [CoRAG repository](https://github.com/microsoft/CoRAG), which provides the model, inference data, and evaluation code for the paper [Chain-of-Retrieval Augmented Generation](https://arxiv.org/abs/2501.14342).
 
 ## Main Enhancements
 
