@@ -57,6 +57,26 @@ class VllmClient:
 
         return completion['choices'][0]['message']['content'] if return_str else completion
 
+    def call_completion(self, prompt: str, return_str: bool = True, **kwargs) -> Union[str, Dict]:
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+        data = {
+            "model": self.model,
+            "prompt": prompt,
+            **kwargs
+        }
+        
+        response = requests.post(f"{self.base_url}/completions", headers=headers, json=data)
+        response.raise_for_status()
+        completion = response.json()
+        
+        if 'usage' in completion:
+            self.token_consumed.increment(num=completion['usage']['total_tokens'])
+
+        return completion['choices'][0]['text'] if return_str else completion
+
     def batch_call_chat(self, messages: List[List[Dict]], return_str: bool = True, num_workers: int = 4, **kwargs) -> List[Union[str, Dict]]:
         with ThreadPoolExecutor(max_workers=num_workers) as executor:
             return list(executor.map(
