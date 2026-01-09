@@ -57,6 +57,26 @@ bash scripts/start_vllm_server.sh <model_name_or_path>
 你需要一个服务来处理文档检索。这应该是自定义的 Graph API。
 默认 URL: `http://localhost:8023/retrieve`
 
+> [!NOTE]
+> **自定义搜索 API 返回格式 (Custom Search API Response Format)**
+> 检索服务器必须接受包含 `{"query": "your query"}` 的 JSON POST 请求，并返回一个字符串列表（即检索到的段落）。
+> 
+> **Request:**
+> `POST /retrieve`
+> ```json
+> {
+>   "query": "What is the capital of France?"
+> }
+> ```
+> 
+> **Response:**
+> ```json
+> [
+>   "Paris is the capital and most populous city of France.",
+>   "France is a country located in Western Europe."
+> ]
+> ```
+
 ---
 
 ## 2. 配置参数 (Configuration Parameters)

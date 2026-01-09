@@ -57,6 +57,26 @@ Default URL: `http://localhost:8000/v1`
 You need a service to handle document retrieval. This should be a custom Graph API.
 Default URL: `http://localhost:8023/retrieve`
 
+> [!NOTE]
+> **Custom Search API Response Format**
+> The retrieval server must accept a JSON POST with `{"query": "your query"}` and return a JSON list of strings (passages).
+> 
+> **Request:**
+> `POST /retrieve`
+> ```json
+> {
+>   "query": "What is the capital of France?"
+> }
+> ```
+> 
+> **Response:**
+> ```json
+> [
+>   "Paris is the capital and most populous city of France.",
+>   "France is a country located in Western Europe."
+> ]
+> ```
+
 ---
 
 ## 2. Configuration Parameters
