@@ -16,7 +16,34 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../s
 from datasets import load_dataset
 from vllm_client import VllmClient
 from agent.corag_agent import CoRagAgent
-from inference.qa_utils import normalize_squad
+
+# normalize_squad is used for rejection sampling answer checking.
+# Some environments may not include the optional `inference` package/module.
+# We provide a lightweight fallback implementation compatible with SQuAD-style normalization.
+try:
+    from inference.qa_utils import normalize_squad  # type: ignore
+except Exception:
+    import re
+    import string
+
+    def normalize_squad(text: str) -> str:
+        """Lower text and remove punctuation, articles and extra whitespace (SQuAD-style)."""
+        if text is None:
+            return ""
+
+        def lower(s: str) -> str:
+            return s.lower()
+
+        def remove_punc(s: str) -> str:
+            return "".join(ch for ch in s if ch not in set(string.punctuation))
+
+        def remove_articles(s: str) -> str:
+            return re.sub(r"\b(a|an|the)\b", " ", s)
+
+        def white_space_fix(s: str) -> str:
+            return " ".join(s.split())
+
+        return white_space_fix(remove_articles(remove_punc(lower(text))))
 
 def check_answer(prediction: str, ground_truths: List[str]) -> bool:
     """
