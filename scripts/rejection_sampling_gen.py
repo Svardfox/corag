@@ -152,6 +152,7 @@ def process_example(example: Dict, agent: CoRagAgent, args: argparse.Namespace) 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", type=str, default="corag/multihopqa")
+    parser.add_argument("--subset", type=str, default="2wikimultihopqa", help="HF dataset config name (e.g., 2wikimultihopqa/hotpotqa/musique/bamboogle)")
     parser.add_argument("--split", type=str, default="train")
     parser.add_argument("--output_file", type=str, default="data/rejection_sampled_data.jsonl")
     parser.add_argument("--vllm_url", type=str, default="http://localhost:8000")
@@ -165,8 +166,8 @@ def main():
     args = parser.parse_args()
 
     # Load dataset
-    print(f"Loading dataset {args.dataset}...")
-    ds = load_dataset(args.dataset, split=args.split)
+    print(f"Loading dataset {args.dataset} ({args.subset}), split={args.split} ...")
+    ds = load_dataset(args.dataset, args.subset, split=args.split)
     
     if args.max_examples > 0:
         ds = ds.select(range(args.max_examples))
