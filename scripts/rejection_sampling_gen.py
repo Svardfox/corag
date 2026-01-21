@@ -4,6 +4,7 @@ import sys
 import json
 import argparse
 import random
+import threading
 import concurrent.futures
 from typing import List, Dict, Any
 from tqdm import tqdm
@@ -70,6 +71,73 @@ def check_answer(prediction: str, ground_truths: List[str]) -> bool:
             return True
             
     return False
+
+
+def check_judge_model_available(judge_api_base: str, judge_api_key: str) -> bool:
+    """Test if judge model API is available."""
+    try:
+        import requests
+        headers = {"Authorization": f"Bearer {judge_api_key}"} if judge_api_key else {}
+        response = requests.get(f"{judge_api_base.rstrip('/')}/models", headers=headers, timeout=5)
+        return response.status_code == 200
+    except Exception:
+        return False
+
+
+def check_answer_with_llm_judge(
+    prediction: str, 
+    ground_truths: List[str], 
+    query: str,
+    judge_client: VllmClient,
+    print_lock: threading.Lock = None
+) -> bool:
+    """
+    Use LLM as judge to check if prediction is correct.
+    """
+    if not prediction:
+        return False
+    
+    # Format ground truths
+    gt_text = " or ".join([f'"{gt}"' for gt in ground_truths if gt])
+    if not gt_text:
+        return False
+    
+    prompt = f"""You are an expert evaluator. Determine if the predicted answer correctly answers the question.
+
+Question: {query}
+
+Ground truth answer(s): {gt_text}
+
+Predicted answer: {prediction}
+
+Evaluate whether the predicted answer is correct. Consider:
+1. Semantic equivalence (same meaning even if wording differs)
+2. Factual correctness
+3. Completeness (if multiple answers are expected)
+
+Respond with only "YES" if the answer is correct, or "NO" if it is incorrect. Do not provide any explanation."""
+
+    messages = [{"role": "user", "content": prompt}]
+    
+    try:
+        response = judge_client.call_chat(messages=messages, temperature=0.0, max_tokens=10)
+        response_upper = response.strip().upper()
+        # Check if response starts with "YES" or contains "YES" before "NO"
+        if response_upper.startswith("YES"):
+            return True
+        # Check if "YES" appears before "NO" in the response
+        yes_pos = response_upper.find("YES")
+        no_pos = response_upper.find("NO")
+        if yes_pos != -1 and (no_pos == -1 or yes_pos < no_pos):
+            return True
+        return False
+    except Exception as e:
+        if print_lock:
+            with print_lock:
+                print(f"  [WARNING] LLM judge error: {e}, falling back to string matching")
+        else:
+            print(f"  [WARNING] LLM judge error: {e}, falling back to string matching")
+        return check_answer(prediction, ground_truths)
 
 class VerboseCoRagAgent:
     """Wrapper around CoRagAgent to add verbose logging."""
@@ -181,7 +249,7 @@ class VerboseCoRagAgent:
         return self.agent.generate_final_answer(*args, **kwargs)
 
 
-def process_example(example: Dict, agent: CoRagAgent, args: argparse.Namespace) -> List[Dict]:
+def process_example(example: Dict, agent: CoRagAgent, args: argparse.Namespace, print_lock: threading.Lock = None) -> List[Dict]:
     """
     Generate multiple paths for a single example and return valid ones.
     """
@@ -200,11 +268,20 @@ def process_example(example: Dict, agent: CoRagAgent, args: argparse.Namespace) 
     # Note: CoRagAgent isn't fully thread safe if sharing same vllm client with shared tokenizer?
     # CoRagAgent has self.lock for tokenizer.
     
-    print(f"\n[Query] {query}")
-    print(f"[Ground Truth] {ground_truths}")
+    if print_lock:
+        with print_lock:
+            print(f"\n[Query] {query}")
+            print(f"[Ground Truth] {ground_truths}")
+    else:
+        print(f"\n[Query] {query}")
+        print(f"[Ground Truth] {ground_truths}")
     
     for sample_idx in range(args.n_samples):
-        print(f"\n--- Sampling path {sample_idx + 1}/{args.n_samples} ---")
+        if print_lock:
+            with print_lock:
+                print(f"\n--- Sampling path {sample_idx + 1}/{args.n_samples} ---")
+        else:
+            print(f"\n--- Sampling path {sample_idx + 1}/{args.n_samples} ---")
         try:
             # Sample a path
             # Task desc is usually handled prompt-side or passed here
@@ -219,11 +296,19 @@ def process_example(example: Dict, agent: CoRagAgent, args: argparse.Namespace) 
             )
             
             # Print sampling path
-            print(f"  Path steps ({len(path.past_subqueries)} steps):")
-            for i, (sq, sa) in enumerate(zip(path.past_subqueries, path.past_subanswers)):
-                print(f"    Step {i+1}:")
-                print(f"      SubQuery: {sq}")
-                print(f"      SubAnswer: {sa}")
+            if print_lock:
+                with print_lock:
+                    print(f"  Path steps ({len(path.past_subqueries)} steps):")
+                    for i, (sq, sa) in enumerate(zip(path.past_subqueries, path.past_subanswers)):
+                        print(f"    Step {i+1}:")
+                        print(f"      SubQuery: {sq}")
+                        print(f"      SubAnswer: {sa}")
+            else:
+                print(f"  Path steps ({len(path.past_subqueries)} steps):")
+                for i, (sq, sa) in enumerate(zip(path.past_subqueries, path.past_subanswers)):
+                    print(f"    Step {i+1}:")
+                    print(f"      SubQuery: {sq}")
+                    print(f"      SubAnswer: {sa}")
             
             # Generate final answer based on the path
             # We construct a mock "path" context for final answer generation
@@ -236,11 +321,19 @@ def process_example(example: Dict, agent: CoRagAgent, args: argparse.Namespace) 
                 temperature=0.0 # Deterministic final answer
             )
             
-            print(f"  Final Answer: {final_ans}")
-            
             # Check correctness
-            is_correct = check_answer(final_ans, ground_truths)
-            print(f"  Correct: {'✓ YES' if is_correct else '✗ NO'}")
+            if judge_client:
+                is_correct = check_answer_with_llm_judge(final_ans, ground_truths, query, judge_client, print_lock)
+            else:
+                is_correct = check_answer(final_ans, ground_truths)
+            
+            if print_lock:
+                with print_lock:
+                    print(f"  Final Answer: {final_ans}")
+                    print(f"  Correct: {'✓ YES' if is_correct else '✗ NO'} {'(LLM Judge)' if judge_client else '(String Match)'}")
+            else:
+                print(f"  Final Answer: {final_ans}")
+                print(f"  Correct: {'✓ YES' if is_correct else '✗ NO'} {'(LLM Judge)' if judge_client else '(String Match)'}")
             
             if is_correct:
                 # Construct the output object
@@ -270,10 +363,18 @@ def process_example(example: Dict, agent: CoRagAgent, args: argparse.Namespace) 
                 valid_paths.append(valid_path)
                 
         except Exception as e:
-            print(f"  ✗ Error: {e}")
+            if print_lock:
+                with print_lock:
+                    print(f"  ✗ Error: {e}")
+            else:
+                print(f"  ✗ Error: {e}")
             continue
     
-    print(f"\n[Summary] Query '{query[:50]}...' generated {len(valid_paths)}/{args.n_samples} valid paths")
+    if print_lock:
+        with print_lock:
+            print(f"\n[Summary] Query '{query[:50]}...' generated {len(valid_paths)}/{args.n_samples} valid paths")
+    else:
+        print(f"\n[Summary] Query '{query[:50]}...' generated {len(valid_paths)}/{args.n_samples} valid paths")
     return valid_paths
 
 def main():
@@ -296,6 +397,10 @@ def main():
     parser.add_argument("--max_message_length", type=int, default=0, help="Max message length for truncation (0 or negative to disable truncation)")
     parser.add_argument("--max_examples", type=int, default=-1, help="Limit number of examples to process (for debugging)")
     parser.add_argument("--verbose", action="store_true", help="Print detailed information including prompts, retrieval queries, and contexts")
+    parser.add_argument("--num_threads", type=int, default=1, help="Number of threads for parallel processing")
+    parser.add_argument("--judge_model_url", type=str, default=None, help="Judge model API base URL (e.g., http://localhost:8001/v1). If provided and valid, uses LLM as judge instead of string matching.")
+    parser.add_argument("--judge_model_api_key", type=str, default="token-123", help="Judge model API key")
+    parser.add_argument("--judge_model_name", type=str, default=None, help="Judge model name. If not provided, auto-detects from API.")
     
     args = parser.parse_args()
 
@@ -350,19 +455,82 @@ def main():
     base_agent = CoRagAgent(vllm_client=vllm, corpus=dummy_corpus, graph_api_url=args.graph_api_url)
     # Wrap with verbose agent if verbose mode is enabled
     agent = VerboseCoRagAgent(base_agent, verbose=args.verbose) if args.verbose else base_agent
+    
+    # Init Judge Model (if provided)
+    judge_client = None
+    if args.judge_model_url:
+        judge_api_base = args.judge_model_url.rstrip('/')
+        if not judge_api_base.endswith('/v1'):
+            judge_api_base = f"{judge_api_base}/v1"
+        
+        if check_judge_model_available(judge_api_base, args.judge_model_api_key):
+            try:
+                if args.judge_model_name:
+                    judge_model_id = args.judge_model_name
+                else:
+                    judge_model_id = get_vllm_model_id(api_base=judge_api_base, api_key=args.judge_model_api_key)
+                judge_client = VllmClient(model=judge_model_id, api_base=judge_api_base, api_key=args.judge_model_api_key)
+                print(f"[INFO] Using LLM judge model: {judge_model_id} at {judge_api_base}")
+            except Exception as e:
+                print(f"[WARN] Failed to initialize judge model: {e}, falling back to string matching")
+                judge_client = None
+        else:
+            print(f"[WARN] Judge model API at {judge_api_base} is not available, falling back to string matching")
+            judge_client = None
 
-    output_data = []
+    # Create print lock for thread-safe printing
+    print_lock = threading.Lock() if args.num_threads > 1 else None
     
-    # Simple sequential loop for examples, but inside process_example we loop N times.
-    # We could parallelize examples.
+    # Convert dataset to list for indexing
+    data_items = list(ds)
+    total_items = len(data_items)
     
-    print("Starting rejection sampling generation...")
-    for example in tqdm(ds):
-        valid = process_example(example, agent, args)
-        if valid:
-            output_data.extend(valid)
-            # Flush periodically?
+    print(f"Starting rejection sampling generation with {args.num_threads} thread(s)...")
+    
+    if args.num_threads == 1:
+        # Sequential processing (original behavior)
+        output_data = []
+        for example in tqdm(data_items, desc="Processing"):
+            valid = process_example(example, agent, args, print_lock, judge_client)
+            if valid:
+                output_data.extend(valid)
+    else:
+        # Multi-threaded processing
+        results_map = {}
+        
+        def process_with_index(index: int, example: Dict) -> tuple:
+            """Process example and return (index, result)."""
+            try:
+                valid = process_example(example, agent, args, print_lock, judge_client)
+                return (index, valid)
+            except Exception as e:
+                if print_lock:
+                    with print_lock:
+                        print(f"Error processing example at index {index}: {e}")
+                else:
+                    print(f"Error processing example at index {index}: {e}")
+                return (index, [])
+        
+        with ThreadPoolExecutor(max_workers=args.num_threads) as executor:
+            # Submit all tasks
+            future_to_index = {
+                executor.submit(process_with_index, i, example): i 
+                for i, example in enumerate(data_items)
+            }
             
+            # Process completed tasks with progress bar
+            for future in tqdm(concurrent.futures.as_completed(future_to_index), 
+                             total=total_items, desc="Processing"):
+                index, valid = future.result()
+                if valid:
+                    results_map[index] = valid
+        
+        # Reconstruct output_data in original order
+        output_data = []
+        for i in range(total_items):
+            if i in results_map:
+                output_data.extend(results_map[i])
+    
     # Save results
     os.makedirs(os.path.dirname(args.output_file), exist_ok=True)
     with open(args.output_file, 'w', encoding='utf-8') as f:
