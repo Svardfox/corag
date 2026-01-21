@@ -155,7 +155,11 @@ def main():
     parser.add_argument("--subset", type=str, default="2wikimultihopqa", help="HF dataset config name (e.g., 2wikimultihopqa/hotpotqa/musique/bamboogle)")
     parser.add_argument("--split", type=str, default="train")
     parser.add_argument("--output_file", type=str, default="data/rejection_sampled_data.jsonl")
-    parser.add_argument("--vllm_url", type=str, default="http://localhost:8000")
+    # vLLM OpenAI-compatible base URL. Prefer --vllm_api_base (e.g. http://host:8000/v1).
+    # --vllm_url is kept for backward compatibility (e.g. http://host:8000).
+    parser.add_argument("--vllm_api_base", type=str, default=None, help="vLLM OpenAI API base URL, e.g. http://localhost:8000/v1")
+    parser.add_argument("--vllm_api_key", type=str, default="token-123", help="vLLM OpenAI API key (if required)")
+    parser.add_argument("--vllm_url", type=str, default="http://localhost:8000", help="(Deprecated) vLLM host URL without /v1, e.g. http://localhost:8000")
     parser.add_argument("--model", type=str, default="meta-llama/Meta-Llama-3-8B-Instruct") 
     parser.add_argument("--graph_api_url", type=str, default="http://localhost:8023/retrieve")
     parser.add_argument("--n_samples", type=int, default=5, help="Number of paths to sample per example")
@@ -173,9 +177,14 @@ def main():
         ds = ds.select(range(args.max_examples))
 
     # Init VLLM Client
-    # Assuming VllmClient interface: init(url, model, ...)
-    # Adjust based on src/vllm_client.py
-    vllm = VllmClient(url=args.vllm_url, model=args.model)
+    api_base = args.vllm_api_base
+    if not api_base:
+        # Backward-compatible: accept http://host:port and append /v1
+        api_base = args.vllm_url.rstrip("/")
+        if not api_base.endswith("/v1"):
+            api_base = f"{api_base}/v1"
+
+    vllm = VllmClient(model=args.model, api_base=api_base, api_key=args.vllm_api_key)
     
     # Init Agent
     # We pass empty list as corpus since we use graph_api
