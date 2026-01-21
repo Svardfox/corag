@@ -1,5 +1,6 @@
 
 import os
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 import sys
 import json
 import argparse
@@ -277,11 +278,12 @@ def process_example(example: Dict, agent: CoRagAgent, args: argparse.Namespace, 
         print(f"[Ground Truth] {ground_truths}")
     
     for sample_idx in range(args.n_samples):
-        if print_lock:
-            with print_lock:
+        if args.verbose:
+            if print_lock:
+                with print_lock:
+                    print(f"\n--- Sampling path {sample_idx + 1}/{args.n_samples} ---")
+            else:
                 print(f"\n--- Sampling path {sample_idx + 1}/{args.n_samples} ---")
-        else:
-            print(f"\n--- Sampling path {sample_idx + 1}/{args.n_samples} ---")
         try:
             # Sample a path
             # Task desc is usually handled prompt-side or passed here
@@ -296,19 +298,21 @@ def process_example(example: Dict, agent: CoRagAgent, args: argparse.Namespace, 
             )
             
             # Print sampling path
-            if print_lock:
-                with print_lock:
+            # Print sampling path
+            if args.verbose:
+                if print_lock:
+                    with print_lock:
+                        print(f"  Path steps ({len(path.past_subqueries)} steps):")
+                        for i, (sq, sa) in enumerate(zip(path.past_subqueries, path.past_subanswers)):
+                            print(f"    Step {i+1}:")
+                            print(f"      SubQuery: {sq}")
+                            print(f"      SubAnswer: {sa}")
+                else:
                     print(f"  Path steps ({len(path.past_subqueries)} steps):")
                     for i, (sq, sa) in enumerate(zip(path.past_subqueries, path.past_subanswers)):
                         print(f"    Step {i+1}:")
                         print(f"      SubQuery: {sq}")
                         print(f"      SubAnswer: {sa}")
-            else:
-                print(f"  Path steps ({len(path.past_subqueries)} steps):")
-                for i, (sq, sa) in enumerate(zip(path.past_subqueries, path.past_subanswers)):
-                    print(f"    Step {i+1}:")
-                    print(f"      SubQuery: {sq}")
-                    print(f"      SubAnswer: {sa}")
             
             # Generate final answer based on the path
             # We construct a mock "path" context for final answer generation
@@ -327,13 +331,14 @@ def process_example(example: Dict, agent: CoRagAgent, args: argparse.Namespace, 
             else:
                 is_correct = check_answer(final_ans, ground_truths)
             
-            if print_lock:
-                with print_lock:
+            if args.verbose:
+                if print_lock:
+                    with print_lock:
+                        print(f"  Final Answer: {final_ans}")
+                        print(f"  Correct: {'✓ YES' if is_correct else '✗ NO'} {'(LLM Judge)' if judge_client else '(String Match)'}")
+                else:
                     print(f"  Final Answer: {final_ans}")
                     print(f"  Correct: {'✓ YES' if is_correct else '✗ NO'} {'(LLM Judge)' if judge_client else '(String Match)'}")
-            else:
-                print(f"  Final Answer: {final_ans}")
-                print(f"  Correct: {'✓ YES' if is_correct else '✗ NO'} {'(LLM Judge)' if judge_client else '(String Match)'}")
             
             if is_correct:
                 # Construct the output object
