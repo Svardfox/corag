@@ -269,13 +269,14 @@ def process_example(example: Dict, agent: CoRagAgent, args: argparse.Namespace, 
     # Note: CoRagAgent isn't fully thread safe if sharing same vllm client with shared tokenizer?
     # CoRagAgent has self.lock for tokenizer.
     
-    if print_lock:
-        with print_lock:
+    if args.verbose:
+        if print_lock:
+            with print_lock:
+                print(f"\n[Query] {query}")
+                print(f"[Ground Truth] {ground_truths}")
+        else:
             print(f"\n[Query] {query}")
             print(f"[Ground Truth] {ground_truths}")
-    else:
-        print(f"\n[Query] {query}")
-        print(f"[Ground Truth] {ground_truths}")
     
     for sample_idx in range(args.n_samples):
         if args.verbose:
@@ -376,11 +377,12 @@ def process_example(example: Dict, agent: CoRagAgent, args: argparse.Namespace, 
                 print(f"  ✗ Error: {e}")
             continue
     
-    if print_lock:
-        with print_lock:
+    if args.verbose:
+        if print_lock:
+            with print_lock:
+                print(f"\n[Summary] Query '{query[:50]}...' generated {len(valid_paths)}/{args.n_samples} valid paths")
+        else:
             print(f"\n[Summary] Query '{query[:50]}...' generated {len(valid_paths)}/{args.n_samples} valid paths")
-    else:
-        print(f"\n[Summary] Query '{query[:50]}...' generated {len(valid_paths)}/{args.n_samples} valid paths")
     return valid_paths
 
 def main():
