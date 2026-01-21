@@ -361,6 +361,7 @@ def process_example(example: Dict, agent: CoRagAgent, args: argparse.Namespace, 
                     valid_path["steps"].append(step)
                 
                 valid_paths.append(valid_path)
+                break
                 
         except Exception as e:
             if print_lock:
@@ -511,7 +512,7 @@ def main():
                     print(f"Error processing example at index {index}: {e}")
                 return (index, [])
         
-        with ThreadPoolExecutor(max_workers=args.num_threads) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=args.num_threads) as executor:
             # Submit all tasks
             future_to_index = {
                 executor.submit(process_with_index, i, example): i 
