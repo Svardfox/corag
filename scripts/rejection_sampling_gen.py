@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../"
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../src")))
 
 from datasets import load_dataset
-from vllm_client import VllmClient
+from vllm_client import VllmClient, get_vllm_model_id
 from agent.corag_agent import CoRagAgent
 
 # normalize_squad is used for rejection sampling answer checking.
@@ -160,7 +160,8 @@ def main():
     parser.add_argument("--vllm_api_base", type=str, default=None, help="vLLM OpenAI API base URL, e.g. http://localhost:8000/v1")
     parser.add_argument("--vllm_api_key", type=str, default="token-123", help="vLLM OpenAI API key (if required)")
     parser.add_argument("--vllm_url", type=str, default="http://localhost:8000", help="(Deprecated) vLLM host URL without /v1, e.g. http://localhost:8000")
-    parser.add_argument("--model", type=str, default="meta-llama/Meta-Llama-3-8B-Instruct") 
+    # If not provided (or invalid), we will auto-detect the first available model from vLLM /v1/models.
+    parser.add_argument("--model", type=str, default="", help="vLLM model id/name. If empty or invalid, auto-detect from /v1/models.") 
     parser.add_argument("--graph_api_url", type=str, default="http://localhost:8023/retrieve")
     parser.add_argument("--n_samples", type=int, default=5, help="Number of paths to sample per example")
     parser.add_argument("--temperature", type=float, default=0.7)
@@ -184,7 +185,34 @@ def main():
         if not api_base.endswith("/v1"):
             api_base = f"{api_base}/v1"
 
-    vllm = VllmClient(model=args.model, api_base=api_base, api_key=args.vllm_api_key)
+    # Resolve model id: if user didn't pass --model, or passed an invalid model name, fallback to autodetect.
+    try:
+        import requests
+
+        headers = {"Authorization": f"Bearer {args.vllm_api_key}"} if args.vllm_api_key else {}
+        resp = requests.get(f"{api_base.rstrip('/')}/models", headers=headers, timeout=10)
+        resp.raise_for_status()
+        models_payload = resp.json()
+        available_models = [m.get("id") for m in (models_payload.get("data") or []) if isinstance(m, dict) and m.get("id")]
+    except Exception:
+        available_models = []
+
+    model_id = (args.model or "").strip()
+    if (not model_id) or (available_models and model_id not in available_models):
+        try:
+            detected = get_vllm_model_id(api_base=api_base, api_key=args.vllm_api_key)
+            if available_models and model_id and model_id not in available_models:
+                print(f"[warn] --model '{model_id}' not found in vLLM /models; falling back to autodetected model '{detected}'.")
+            elif not model_id:
+                print(f"[info] --model not provided; using autodetected model '{detected}'.")
+            model_id = detected
+        except Exception as e:
+            if not model_id:
+                raise RuntimeError(f"Failed to auto-detect vLLM model id from {api_base}: {e}")
+            # If user provided a model but autodetect failed, keep the user-provided value.
+            print(f"[warn] Failed to auto-detect vLLM model id from {api_base}: {e}. Proceeding with --model '{model_id}'.")
+
+    vllm = VllmClient(model=model_id, api_base=api_base, api_key=args.vllm_api_key)
     
     # Init Agent
     # We pass empty list as corpus since we use graph_api
