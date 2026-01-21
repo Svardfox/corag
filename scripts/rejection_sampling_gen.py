@@ -162,6 +162,7 @@ def main():
     parser.add_argument("--vllm_url", type=str, default="http://localhost:8000", help="(Deprecated) vLLM host URL without /v1, e.g. http://localhost:8000")
     # If not provided (or invalid), we will auto-detect the first available model from vLLM /v1/models.
     parser.add_argument("--model", type=str, default="", help="vLLM model id/name. If empty or invalid, auto-detect from /v1/models.") 
+    parser.add_argument("--tokenizer_name", type=str, default=None, help="Tokenizer repo_id (e.g., Qwen/Qwen2.5-7B-Instruct). If not provided, uses --model value.")
     parser.add_argument("--graph_api_url", type=str, default="http://localhost:8023/retrieve")
     parser.add_argument("--n_samples", type=int, default=5, help="Number of paths to sample per example")
     parser.add_argument("--temperature", type=float, default=0.7)
@@ -214,10 +215,15 @@ def main():
 
     vllm = VllmClient(model=model_id, api_base=api_base, api_key=args.vllm_api_key)
     
+    # Load tokenizer for client-side truncation (can use compatible smaller model)
+    tokenizer = None
+    if args.tokenizer_name:
+        tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_name, trust_remote_code=True)
+    
     # Init Agent
     # We pass empty list as corpus since we use graph_api
     dummy_corpus = [] 
-    agent = CoRagAgent(vllm_client=vllm, corpus=dummy_corpus, graph_api_url=args.graph_api_url)
+    agent = CoRagAgent(vllm_client=vllm, corpus=dummy_corpus, graph_api_url=args.graph_api_url, tokenizer=tokenizer)
 
     output_data = []
     
