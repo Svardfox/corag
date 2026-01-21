@@ -164,12 +164,10 @@ class CoRagAgent:
         return subqueries
 
     def _get_subanswer_and_doc_ids(
-            self, subquery: str, max_message_length: int = 4096, debug: bool = False
+            self, subquery: str, max_message_length: int = 4096
     ) -> Tuple[str, List, List[str]]:
         if self.graph_api_url:
-            retriever_results = search_by_graph_api(query=subquery, url=self.graph_api_url, debug=debug)
-            if debug:
-                logger.info(f"[DEBUG] Raw retrieval results: type={type(retriever_results)}, length={len(retriever_results) if isinstance(retriever_results, (list, dict)) else 'N/A'}")
+            retriever_results = search_by_graph_api(query=subquery, url=self.graph_api_url)
             documents = []
             doc_ids = []
             # Handle dict response with 'chunks' key (e.g., {"chunks": [...]})
@@ -192,8 +190,6 @@ class CoRagAgent:
                     content = res.get('contents') or res.get('content') or res.get('text') or str(res)
                     documents.append(content)
                     doc_ids.append(str(res.get('id') or res.get('doc_id') or 'graph_chunk'))
-            if debug:
-                logger.info(f"[DEBUG] Parsed documents: {len(documents)} docs, doc_ids: {doc_ids}")
             documents = documents[::-1]
         else:
             retriever_results: List[Dict] = search_by_http(query=subquery)
