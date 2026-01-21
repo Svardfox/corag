@@ -5,7 +5,7 @@ from copy import deepcopy
 from typing import Optional, List, Dict, Tuple
 from datasets import Dataset
 
-from transformers import AutoTokenizer, PreTrainedTokenizerFast
+from transformers import PreTrainedTokenizerFast
 
 from logger_config import logger
 from vllm_client import VllmClient, get_vllm_model_id
@@ -45,16 +45,13 @@ class CoRagAgent:
         self.final_vllm_client = final_vllm_client
         self.corpus = corpus
         self.graph_api_url = graph_api_url
-        if tokenizer:
-            self.tokenizer = tokenizer
-        else:
-            self.tokenizer: PreTrainedTokenizerFast = AutoTokenizer.from_pretrained(vllm_client.model)
+        self.tokenizer = tokenizer  # Optional: if None, truncation will use simple char-based method
         self.lock = threading.Lock()
 
     def sample_path(
             self, query: str, task_desc: str,
             max_path_length: int = 3,
-            max_message_length: int = 4096,
+            max_message_length: Optional[int] = 4096,
             temperature: float = 0.7,
             **kwargs
     ) -> RagPath:
@@ -111,7 +108,7 @@ class CoRagAgent:
 
     def generate_final_answer(
             self, corag_sample: RagPath, task_desc: str,
-            max_message_length: int = 4096,
+            max_message_length: Optional[int] = 4096,
             documents: Optional[List[str]] = None, **kwargs
     ) -> str:
         messages: List[Dict] = get_generate_final_answer_prompt(
@@ -128,15 +125,26 @@ class CoRagAgent:
         client = self.final_vllm_client if self.final_vllm_client else self.vllm_client
         return client.call_chat(messages=messages, **kwargs)
 
-    def _truncate_long_messages(self, messages: List[Dict], max_length: int):
+    def _truncate_long_messages(self, messages: List[Dict], max_length: Optional[int]):
+        # Disable truncation if max_length is None or 0
+        if max_length is None or max_length <= 0:
+            return
+        
         for msg in messages:
             if len(msg['content']) < 2 * max_length:
                 continue
 
-            with self.lock:
-                msg['content'] = batch_truncate(
-                    [msg['content']], tokenizer=self.tokenizer, max_length=max_length, truncate_from_middle=True
-                )[0]
+            if self.tokenizer:
+                with self.lock:
+                    msg['content'] = batch_truncate(
+                        [msg['content']], tokenizer=self.tokenizer, max_length=max_length, truncate_from_middle=True
+                    )[0]
+            else:
+                # Fallback: simple character-based truncation (rough estimate: 1 token ≈ 4 chars)
+                char_limit = max_length * 4
+                if len(msg['content']) > char_limit:
+                    half = char_limit // 2
+                    msg['content'] = msg['content'][:half] + "\n...\n" + msg['content'][-half:]
 
     def sample_subqueries(self, query: str, task_desc: str, n: int = 10, max_message_length: int = 4096, **kwargs) -> List[str]:
         messages: List[Dict] = get_generate_subquery_prompt(

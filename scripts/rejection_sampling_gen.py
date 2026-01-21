@@ -7,7 +7,6 @@ import random
 import concurrent.futures
 from typing import List, Dict, Any
 from tqdm import tqdm
-from transformers import AutoTokenizer
 
 # Add src to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../")))
@@ -101,8 +100,8 @@ def process_example(example: Dict, agent: CoRagAgent, args: argparse.Namespace) 
                 query=query,
                 task_desc=task_desc,
                 max_path_length=args.max_path_length,
+                max_message_length=args.max_message_length if args.max_message_length > 0 else None,
                 temperature=args.temperature,
-                # Additional args?
             )
             
             # Generate final answer based on the path
@@ -112,6 +111,7 @@ def process_example(example: Dict, agent: CoRagAgent, args: argparse.Namespace) 
             final_ans = agent.generate_final_answer(
                 corag_sample=path,
                 task_desc=task_desc,
+                max_message_length=args.max_message_length if args.max_message_length > 0 else None,
                 temperature=0.0 # Deterministic final answer
             )
             
@@ -162,11 +162,11 @@ def main():
     parser.add_argument("--vllm_url", type=str, default="http://localhost:8000", help="(Deprecated) vLLM host URL without /v1, e.g. http://localhost:8000")
     # If not provided (or invalid), we will auto-detect the first available model from vLLM /v1/models.
     parser.add_argument("--model", type=str, default="", help="vLLM model id/name. If empty or invalid, auto-detect from /v1/models.") 
-    parser.add_argument("--tokenizer_name", type=str, default=None, help="Tokenizer repo_id (e.g., Qwen/Qwen2.5-7B-Instruct). If not provided, uses --model value.")
     parser.add_argument("--graph_api_url", type=str, default="http://localhost:8023/retrieve")
     parser.add_argument("--n_samples", type=int, default=5, help="Number of paths to sample per example")
     parser.add_argument("--temperature", type=float, default=0.7)
     parser.add_argument("--max_path_length", type=int, default=3)
+    parser.add_argument("--max_message_length", type=int, default=0, help="Max message length for truncation (0 or negative to disable truncation)")
     parser.add_argument("--max_examples", type=int, default=-1, help="Limit number of examples to process (for debugging)")
     
     args = parser.parse_args()
@@ -215,15 +215,11 @@ def main():
 
     vllm = VllmClient(model=model_id, api_base=api_base, api_key=args.vllm_api_key)
     
-    # Load tokenizer for client-side truncation (can use compatible smaller model)
-    tokenizer = None
-    if args.tokenizer_name:
-        tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_name, trust_remote_code=True)
-    
     # Init Agent
     # We pass empty list as corpus since we use graph_api
+    # Tokenizer is optional: if not provided, uses simple char-based truncation
     dummy_corpus = [] 
-    agent = CoRagAgent(vllm_client=vllm, corpus=dummy_corpus, graph_api_url=args.graph_api_url, tokenizer=tokenizer)
+    agent = CoRagAgent(vllm_client=vllm, corpus=dummy_corpus, graph_api_url=args.graph_api_url)
 
     output_data = []
     
