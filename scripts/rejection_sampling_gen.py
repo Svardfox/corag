@@ -495,6 +495,11 @@ def main():
     
     print(f"Starting rejection sampling generation with {args.num_threads} thread(s)...")
     
+    # Ensure output directory exists and clear/create the file
+    os.makedirs(os.path.dirname(args.output_file), exist_ok=True)
+    with open(args.output_file, 'w', encoding='utf-8') as f:
+        pass  # Just create/clear the file
+    
     if args.num_threads == 1:
         # Sequential processing (original behavior)
         output_data = []
@@ -502,6 +507,10 @@ def main():
             valid = process_example(example, agent, args, print_lock, judge_client)
             if valid:
                 output_data.extend(valid)
+                # Incremental save
+                with open(args.output_file, 'a', encoding='utf-8') as f:
+                    for item in valid:
+                        f.write(json.dumps(item, ensure_ascii=False) + '\n')
     else:
         # Multi-threaded processing
         results_map = {}
@@ -532,19 +541,15 @@ def main():
                 index, valid = future.result()
                 if valid:
                     results_map[index] = valid
+                    # Incremental save
+                    with open(args.output_file, 'a', encoding='utf-8') as f:
+                        for item in valid:
+                            f.write(json.dumps(item, ensure_ascii=False) + '\n')
         
-        # Reconstruct output_data in original order
-        output_data = []
-        for i in range(total_items):
             if i in results_map:
                 output_data.extend(results_map[i])
     
-    # Save results
-    os.makedirs(os.path.dirname(args.output_file), exist_ok=True)
-    with open(args.output_file, 'w', encoding='utf-8') as f:
-        for item in output_data:
-            f.write(json.dumps(item, ensure_ascii=False) + '\n')
-            
+    # Results are already saved incrementally
     print(f"Saved {len(output_data)} valid paths to {args.output_file}")
 
 if __name__ == "__main__":
