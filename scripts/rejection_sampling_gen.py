@@ -249,7 +249,7 @@ class VerboseCoRagAgent:
         return self.agent.generate_final_answer(*args, **kwargs)
 
 
-def process_example(example: Dict, agent: CoRagAgent, args: argparse.Namespace, print_lock: threading.Lock = None) -> List[Dict]:
+def process_example(example: Dict, agent: CoRagAgent, args: argparse.Namespace, print_lock: threading.Lock = None, judge_client: VllmClient = None) -> List[Dict]:
     """
     Generate multiple paths for a single example and return valid ones.
     """
