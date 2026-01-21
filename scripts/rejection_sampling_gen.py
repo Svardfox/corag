@@ -90,7 +90,11 @@ def process_example(example: Dict, agent: CoRagAgent, args: argparse.Namespace) 
     # Note: CoRagAgent isn't fully thread safe if sharing same vllm client with shared tokenizer?
     # CoRagAgent has self.lock for tokenizer.
     
-    for _ in range(args.n_samples):
+    print(f"\n[Query] {query}")
+    print(f"[Ground Truth] {ground_truths}")
+    
+    for sample_idx in range(args.n_samples):
+        print(f"\n--- Sampling path {sample_idx + 1}/{args.n_samples} ---")
         try:
             # Sample a path
             # Task desc is usually handled prompt-side or passed here
@@ -104,6 +108,13 @@ def process_example(example: Dict, agent: CoRagAgent, args: argparse.Namespace) 
                 temperature=args.temperature,
             )
             
+            # Print sampling path
+            print(f"  Path steps ({len(path.past_subqueries)} steps):")
+            for i, (sq, sa) in enumerate(zip(path.past_subqueries, path.past_subanswers)):
+                print(f"    Step {i+1}:")
+                print(f"      SubQuery: {sq}")
+                print(f"      SubAnswer: {sa[:100]}..." if len(sa) > 100 else f"      SubAnswer: {sa}")
+            
             # Generate final answer based on the path
             # We construct a mock "path" context for final answer generation
             # CoRagAgent.generate_final_answer takes a RagPath
@@ -115,8 +126,13 @@ def process_example(example: Dict, agent: CoRagAgent, args: argparse.Namespace) 
                 temperature=0.0 # Deterministic final answer
             )
             
+            print(f"  Final Answer: {final_ans}")
+            
             # Check correctness
-            if check_answer(final_ans, ground_truths):
+            is_correct = check_answer(final_ans, ground_truths)
+            print(f"  Correct: {'✓ YES' if is_correct else '✗ NO'}")
+            
+            if is_correct:
                 # Construct the output object
                 # We want to save the steps
                 valid_path = {
@@ -144,9 +160,10 @@ def process_example(example: Dict, agent: CoRagAgent, args: argparse.Namespace) 
                 valid_paths.append(valid_path)
                 
         except Exception as e:
-            print(f"Error sampling path for {query}: {e}")
+            print(f"  ✗ Error: {e}")
             continue
-
+    
+    print(f"\n[Summary] Query '{query[:50]}...' generated {len(valid_paths)}/{args.n_samples} valid paths")
     return valid_paths
 
 def main():
