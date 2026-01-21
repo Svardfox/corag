@@ -71,6 +71,116 @@ def check_answer(prediction: str, ground_truths: List[str]) -> bool:
             
     return False
 
+class VerboseCoRagAgent:
+    """Wrapper around CoRagAgent to add verbose logging."""
+    def __init__(self, agent: CoRagAgent, verbose: bool = False):
+        self.agent = agent
+        self.verbose = verbose
+    
+    def __getattr__(self, name):
+        return getattr(self.agent, name)
+    
+    def sample_path(self, *args, **kwargs):
+        if not self.verbose:
+            return self.agent.sample_path(*args, **kwargs)
+        
+        # Import here to avoid circular imports
+        from prompts import get_generate_subquery_prompt, get_generate_intermediate_answer_prompt
+        from search.search_utils import search_by_graph_api
+        
+        query = kwargs.get('query') or args[0]
+        task_desc = kwargs.get('task_desc') or args[1]
+        past_subqueries = kwargs.get('past_subqueries', [])
+        past_subanswers = kwargs.get('past_subanswers', [])
+        
+        # Monkey patch to intercept calls
+        original_get_subanswer = self.agent._get_subanswer_and_doc_ids
+        original_call_chat = self.agent.vllm_client.call_chat
+        
+        def verbose_get_subanswer(subquery, max_message_length=4096):
+            print(f"\n    [RETRIEVAL] Query: {subquery}")
+            if self.agent.graph_api_url:
+                print(f"    [RETRIEVAL] API URL: {self.agent.graph_api_url}")
+                raw_results = search_by_graph_api(subquery, self.agent.graph_api_url)
+                print(f"    [RETRIEVAL] Raw response type: {type(raw_results)}")
+                if isinstance(raw_results, dict):
+                    print(f"    [RETRIEVAL] Response keys: {list(raw_results.keys())}")
+                    if 'chunks' in raw_results:
+                        print(f"    [RETRIEVAL] Raw chunks count: {len(raw_results['chunks'])}")
+            subanswer, doc_ids, documents = original_get_subanswer(subquery, max_message_length)
+            print(f"    [RETRIEVAL] Retrieved {len(documents)} documents")
+            for i, doc in enumerate(documents):
+                doc_preview = doc[:300] + "..." if len(doc) > 300 else doc
+                print(f"      Doc {i+1} ({len(doc)} chars): {doc_preview}")
+            
+            # Print intermediate answer prompt
+            prompt_messages = get_generate_intermediate_answer_prompt(subquery, documents)
+            print(f"    [PROMPT] Intermediate Answer Prompt:")
+            for msg in prompt_messages:
+                content = msg['content']
+                if len(content) > 1000:
+                    print(f"      {msg['role']}: {content[:500]}...\n      ... (truncated, total {len(content)} chars)")
+                else:
+                    print(f"      {msg['role']}: {content}")
+            
+            return subanswer, doc_ids, documents
+        
+        def verbose_call_chat(messages, **chat_kwargs):
+            # Check if this is a subquery generation call
+            if len(messages) == 1 and messages[0].get('role') == 'user':
+                content = messages[0].get('content', '')
+                if 'generate a new simple follow-up question' in content or 'Intermediate query' in content:
+                    print(f"\n    [PROMPT] SubQuery Generation Prompt:")
+                    if len(content) > 1000:
+                        print(f"      {content[:500]}...\n      ... (truncated, total {len(content)} chars)")
+                    else:
+                        print(f"      {content}")
+            
+            result = original_call_chat(messages, **chat_kwargs)
+            return result
+        
+        # Temporarily replace methods
+        self.agent._get_subanswer_and_doc_ids = verbose_get_subanswer
+        self.agent.vllm_client.call_chat = verbose_call_chat
+        
+        try:
+            result = self.agent.sample_path(*args, **kwargs)
+        finally:
+            # Restore original methods
+            self.agent._get_subanswer_and_doc_ids = original_get_subanswer
+            self.agent.vllm_client.call_chat = original_call_chat
+        
+        return result
+    
+    def generate_final_answer(self, *args, **kwargs):
+        if not self.verbose:
+            return self.agent.generate_final_answer(*args, **kwargs)
+        
+        from prompts import get_generate_final_answer_prompt
+        
+        corag_sample = kwargs.get('corag_sample') or args[0]
+        task_desc = kwargs.get('task_desc') or args[1]
+        documents = kwargs.get('documents')
+        
+        # Print final answer prompt
+        prompt_messages = get_generate_final_answer_prompt(
+            query=corag_sample.query,
+            past_subqueries=corag_sample.past_subqueries or [],
+            past_subanswers=corag_sample.past_subanswers or [],
+            task_desc=task_desc,
+            documents=documents
+        )
+        print(f"\n    [PROMPT] Final Answer Prompt:")
+        for msg in prompt_messages:
+            content = msg['content']
+            if len(content) > 1000:
+                print(f"      {msg['role']}: {content[:500]}...\n      ... (truncated, total {len(content)} chars)")
+            else:
+                print(f"      {msg['role']}: {content}")
+        
+        return self.agent.generate_final_answer(*args, **kwargs)
+
+
 def process_example(example: Dict, agent: CoRagAgent, args: argparse.Namespace) -> List[Dict]:
     """
     Generate multiple paths for a single example and return valid ones.
@@ -185,6 +295,7 @@ def main():
     parser.add_argument("--max_path_length", type=int, default=3)
     parser.add_argument("--max_message_length", type=int, default=0, help="Max message length for truncation (0 or negative to disable truncation)")
     parser.add_argument("--max_examples", type=int, default=-1, help="Limit number of examples to process (for debugging)")
+    parser.add_argument("--verbose", action="store_true", help="Print detailed information including prompts, retrieval queries, and contexts")
     
     args = parser.parse_args()
 
@@ -236,7 +347,9 @@ def main():
     # We pass empty list as corpus since we use graph_api
     # Tokenizer is optional: if not provided, uses simple char-based truncation
     dummy_corpus = [] 
-    agent = CoRagAgent(vllm_client=vllm, corpus=dummy_corpus, graph_api_url=args.graph_api_url)
+    base_agent = CoRagAgent(vllm_client=vllm, corpus=dummy_corpus, graph_api_url=args.graph_api_url)
+    # Wrap with verbose agent if verbose mode is enabled
+    agent = VerboseCoRagAgent(base_agent, verbose=args.verbose) if args.verbose else base_agent
 
     output_data = []
     
