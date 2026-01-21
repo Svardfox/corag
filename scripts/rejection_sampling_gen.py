@@ -113,7 +113,7 @@ def process_example(example: Dict, agent: CoRagAgent, args: argparse.Namespace) 
             for i, (sq, sa) in enumerate(zip(path.past_subqueries, path.past_subanswers)):
                 print(f"    Step {i+1}:")
                 print(f"      SubQuery: {sq}")
-                print(f"      SubAnswer: {sa[:100]}..." if len(sa) > 100 else f"      SubAnswer: {sa}")
+                print(f"      SubAnswer: {sa}")
             
             # Generate final answer based on the path
             # We construct a mock "path" context for final answer generation
