@@ -524,6 +524,7 @@ def main():
             if x.get('query', '').strip() not in processed_queries
         ]
         print(f"Skipping {original_len - len(data_items)} already processed items. Remaining: {len(data_items)}")
+        total_items = len(data_items)
 
     # Ensure output directory exists
     os.makedirs(os.path.dirname(args.output_file), exist_ok=True)
