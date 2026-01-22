@@ -495,10 +495,43 @@ def main():
     
     print(f"Starting rejection sampling generation with {args.num_threads} thread(s)...")
     
-    # Ensure output directory exists and clear/create the file
+    # Resume logic
+    processed_ids = set()
+    if os.path.exists(args.output_file) and os.path.getsize(args.output_file) > 0:
+        print(f"Checking for existing progress in {args.output_file}...")
+        try:
+            with open(args.output_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    if line.strip():
+                        try:
+                            item = json.loads(line)
+                            if 'id' in item:
+                                processed_ids.add(str(item['id']))
+                        except:
+                            pass
+        except Exception as e:
+            print(f"Error reading existing file: {e}")
+            
+        if processed_ids:
+            print(f"Found {len(processed_ids)} processed examples. Resuming...")
+            
+    # Filter dataset if resuming
+    if processed_ids:
+        original_len = len(data_items)
+        # Check both 'id' and '_id' to be safe, and handle ID type mismatch (str vs int)
+        data_items = [
+            x for x in data_items 
+            if str(x.get('id', x.get('_id', ''))) not in processed_ids
+        ]
+        print(f"Skipping {original_len - len(data_items)} already processed items. Remaining: {len(data_items)}")
+
+    # Ensure output directory exists
     os.makedirs(os.path.dirname(args.output_file), exist_ok=True)
-    with open(args.output_file, 'w', encoding='utf-8') as f:
-        pass  # Just create/clear the file
+    
+    # Only clear file if NOT resuming (empty processed_ids)
+    if not processed_ids:
+        with open(args.output_file, 'w', encoding='utf-8') as f:
+            pass  # Just create/clear the file
     
     if args.num_threads == 1:
         # Sequential processing (original behavior)
