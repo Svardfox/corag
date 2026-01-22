@@ -496,7 +496,8 @@ def main():
     print(f"Starting rejection sampling generation with {args.num_threads} thread(s)...")
     
     # Resume logic
-    processed_ids = set()
+    # Resume logic
+    processed_queries = set()
     if os.path.exists(args.output_file) and os.path.getsize(args.output_file) > 0:
         print(f"Checking for existing progress in {args.output_file}...")
         try:
@@ -505,31 +506,30 @@ def main():
                     if line.strip():
                         try:
                             item = json.loads(line)
-                            if 'id' in item:
-                                processed_ids.add(str(item['id']))
+                            if 'query' in item:
+                                processed_queries.add(item['query'].strip())
                         except:
                             pass
         except Exception as e:
             print(f"Error reading existing file: {e}")
             
-        if processed_ids:
-            print(f"Found {len(processed_ids)} processed examples. Resuming...")
+        if processed_queries:
+            print(f"Found {len(processed_queries)} processed examples. Resuming...")
             
     # Filter dataset if resuming
-    if processed_ids:
+    if processed_queries:
         original_len = len(data_items)
-        # Check both 'id' and '_id' to be safe, and handle ID type mismatch (str vs int)
         data_items = [
             x for x in data_items 
-            if str(x.get('id', x.get('_id', ''))) not in processed_ids
+            if x.get('query', '').strip() not in processed_queries
         ]
         print(f"Skipping {original_len - len(data_items)} already processed items. Remaining: {len(data_items)}")
 
     # Ensure output directory exists
     os.makedirs(os.path.dirname(args.output_file), exist_ok=True)
     
-    # Only clear file if NOT resuming (empty processed_ids)
-    if not processed_ids:
+    # Only clear file if NOT resuming (empty processed_queries)
+    if not processed_queries:
         with open(args.output_file, 'w', encoding='utf-8') as f:
             pass  # Just create/clear the file
     
