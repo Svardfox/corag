@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 class ChainOfRagCollator:
     tokenizer: transformers.PreTrainedTokenizer
     max_len: int = 2048
+    sub_query_only: bool = False
     
     def __call__(self, features: List[Dict]) -> Dict[str, torch.Tensor]:
         input_ids_list = []
@@ -71,8 +72,32 @@ class ChainOfRagCollator:
                 
                 # Label Masking
                 if role == "assistant":
-                    # Mask the header, train on content + footer (EOS)
-                    part_labels = [-100] * len(header_ids) + content_ids + footer_ids
+                    # Determine if this message should be trained at all
+                    is_sub_query = content.startswith("SubQuery:")
+                    if self.sub_query_only and not is_sub_query:
+                        # Mask everything if in sub_query_only mode and this isn't a sub-query
+                        part_labels = [-100] * len(part_ids)
+                    else:
+                        # Standard training or sub_query_only mode with a sub-query
+                        # Mask the header
+                        part_labels = [-100] * len(header_ids)
+                        
+                        # Shield loss for prefixes: "SubQuery:", "SubAnswer:", "Final Answer:"
+                        prefix = None
+                        for p in ["SubQuery: ", "SubAnswer: ", "Final Answer: "]:
+                            if content.startswith(p):
+                                prefix = p
+                                break
+                        
+                        if prefix:
+                            # Encode prefix to get its token length
+                            prefix_ids = self.tokenizer.encode(prefix, add_special_tokens=False)
+                            # Mask prefix and keep the rest of content + footer
+                            part_labels += [-100] * len(prefix_ids)
+                            part_labels += content_ids[len(prefix_ids):] + footer_ids
+                        else:
+                            # No prefix found, train on full content
+                            part_labels += content_ids + footer_ids
                 else:
                     # Mask User / System / Observation
                     part_labels = [-100] * len(part_ids)
@@ -120,6 +145,10 @@ class ModelArguments:
         default="data/train_with_graph_retrieval.jsonl",
         metadata={"help": "The input training data file (a jsonl file)."}
     )
+    sub_query_only: bool = field(
+        default=False,
+        metadata={"help": "If true, only train on sub-queries and ignore other assistant messages."}
+    )
 
 def train():
     parser = transformers.HfArgumentParser((ModelArguments, Arguments))
@@ -148,7 +177,11 @@ def train():
     dataset = load_dataset("json", data_files=data_files)
     
     # Collator
-    collator = ChainOfRagCollator(tokenizer=tokenizer, max_len=training_args.max_len)
+    collator = ChainOfRagCollator(
+        tokenizer=tokenizer, 
+        max_len=training_args.max_len,
+        sub_query_only=model_args.sub_query_only
+    )
     
     trainer = Trainer(
         model=model,
