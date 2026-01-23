@@ -121,7 +121,7 @@ def prepare_data(args):
             ds = [json.loads(line) for line in f]
     else:
         print(f"Loading dataset {args.dataset}, split {args.split}...")
-        ds = load_dataset(args.dataset, args.task, split=args.split)
+        ds = load_dataset('json', data_files=args.dataset, split=args.split)
     
     output_data = []
     
