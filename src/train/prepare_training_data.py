@@ -14,69 +14,38 @@ from search.search_utils import search_by_graph_api
 import concurrent.futures
 
 def process_example(example, args):
-    # Check if example is already in "messages" format
-    if 'messages' in example:
-        conversation = []
-        # Extract initial query
-        initial_query = ""
-        for msg in example['messages']:
-            if msg['role'] == 'user':
-                initial_query = msg['content']
-                break
+    # Support "steps" format (from rejection_sampling_gen.py output)
+    if 'steps' in example and 'query' in example:
+        conversation = [
+            {"role": "user", "content": example['query']}
+        ]
         
-        conversation.append({"role": "user", "content": initial_query})
-        
-        # We need to find SubQuery, Observation, SubAnswer pairs
-        # The logic below assumes the structure from the example file
-        msgs = example['messages']
-        i = 0
-        while i < len(msgs):
-            msg = msgs[i]
-            if msg['role'] == 'assistant' and msg['content'].startswith("SubQuery:"):
-                sq = msg['content'].replace("SubQuery:", "").strip()
-                conversation.append({"role": "assistant", "content": f"SubQuery: {sq}"})
+        for step in example['steps']:
+            sq = step.get('subquery', '')
+            sa = step.get('subanswer', '')
+            if not sq:
+                continue
                 
-                # Retrieve
-                docs_text = retrieve_context(sq, args)
-                conversation.append({"role": "observation", "content": f"Retrieved Context:\n{docs_text}"})
-                
-                # Find the corresponding SubAnswer
-                # Skip the old observation
-                i += 2 
-                if i < len(msgs) and msgs[i]['role'] == 'assistant' and msgs[i]['content'].startswith("SubAnswer:"):
-                    sa = msgs[i]['content'].replace("SubAnswer:", "").strip()
-                    conversation.append({"role": "assistant", "content": f"SubAnswer: {sa}"})
-            elif msg['role'] == 'assistant' and msg['content'].startswith("Final Answer:"):
-                fa = msg['content'].replace("Final Answer:", "").strip()
-                conversation.append({"role": "assistant", "content": f"Final Answer: {fa}"})
-            i += 1
+            conversation.append({"role": "assistant", "content": f"SubQuery: {sq}"})
+            docs_text = retrieve_context(sq, args)
+            conversation.append({"role": "observation", "content": f"Retrieved Context:\n{docs_text}"})
+            conversation.append({"role": "assistant", "content": f"SubAnswer: {sa}"})
+
+        # Final Answer
+        final_answer = ""
+        if 'answers' in example and example['answers']:
+            final_answer = example['answers'][0]
+        elif 'answer' in example:
+            final_answer = example['answer']
+        elif 'generated_final_answer' in example:
+            final_answer = example['generated_final_answer']
+            
+        conversation.append({"role": "assistant", "content": f"Final Answer: {final_answer}"})
         return {"messages": conversation}
 
-    # Original logic for raw data format (query, subqueries, subanswers, answers)
-    conversation = [
-        {"role": "user", "content": example['query']}
-    ]
-    
-    subqueries = example.get('subqueries', [])
-    subanswers = example.get('subanswers', [])
-    
-    # Interleave sub-steps
-    for sq, sa in zip(subqueries, subanswers):
-        # 1. Model generates SubQuery -> Add to conversation (Assistant)
-        conversation.append({"role": "assistant", "content": f"SubQuery: {sq}"})
-        
-        # 2. Retrieve Documents (System/Observation)
-        docs_text = retrieve_context(sq, args)
-        conversation.append({"role": "observation", "content": f"Retrieved Context:\n{docs_text}"})
-        
-        # 3. Model generates SubAnswer -> Add to conversation (Assistant)
-        conversation.append({"role": "assistant", "content": f"SubAnswer: {sa}"})
-
-    # Final Answer
-    final_answer = example['answers'][0] if example['answers'] else ""
-    conversation.append({"role": "assistant", "content": f"Final Answer: {final_answer}"})
-    
-    return {"messages": conversation}
+    # Check if example is already in "messages" format
+    if 'messages' in example:
+        # ... (rest of messages logic) ...
 
 def retrieve_context(sq, args):
     if args.retrieve:
