@@ -16,3 +16,4 @@ eval/
 output/
 logs/
 wandb/
+old_code/

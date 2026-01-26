@@ -3,7 +3,6 @@ import sys
 import json
 import logging
 import torch
-import copy
 from dataclasses import dataclass, field
 from typing import Optional, Dict, List
 from datasets import load_dataset
@@ -27,7 +26,6 @@ logger = logging.getLogger(__name__)
 class ChainOfRagCollator:
     tokenizer: transformers.PreTrainedTokenizer
     max_len: int = 2048
-    sub_query_only: bool = False
     
     def __call__(self, features: List[Dict]) -> Dict[str, torch.Tensor]:
         input_ids_list = []
@@ -42,37 +40,21 @@ class ChainOfRagCollator:
             im_start_id = 151644
             im_end_id = 151645
 
-        # 定义系统提示词，包含 /no_think 标签以切换 Thinking 模型模式
-        system_prompt_text = (
-            "You are a helpful assistant that can use search tools to solve complex multi-step questions. "
-            "When you receive a question, you should decompose it into several simple sub-queries. "
-            "After receiving the retrieved context for each sub-query, provide a sub-answer. "
-            "Finally, give the final answer based on all information. "
-            "Follow the format strictly: SubQuery, SubAnswer, and Final Answer. /no_think"
-        )
-
         for feature in features:
-            messages = copy.deepcopy(feature["messages"])
-            
-            # 动态注入 System Prompt
-            if not (messages and messages[0]["role"] == "system"):
-                messages.insert(0, {"role": "system", "content": system_prompt_text})
+            messages = feature["messages"]
             
             input_ids = []
             labels = []
-            
-            if self.tokenizer.bos_token_id is not None:
-                input_ids.append(self.tokenizer.bos_token_id)
-                labels.append(-100)
             
             for msg in messages:
                 role = msg["role"]
                 content = msg["content"]
                 
+                # Check for observation mapping
                 if role == "observation":
-                    role_str = "user"
-                    if not content.startswith("Retrieved Context:"):
-                        content = f"Retrieved Context:\n{content}"
+                    # Map observation to system or specific observation role if model supports
+                    # We treat it as non-trainable context
+                    role_str = "system" # or "observation"
                 else:
                     role_str = role
                 
@@ -86,28 +68,23 @@ class ChainOfRagCollator:
                 # 3. Footer 拼接: <|im_end|>\n
                 footer_ids = [im_end_id] + [newline_id]
                 
-                # 完整片段 ID 序列
+                # Full specific part
                 part_ids = header_ids + content_ids + footer_ids
                 input_ids.extend(part_ids)
                 
-                # 训练逻辑修复：移除有害的前缀 Mask，确保模型学习如何“开口”输出 SubQuery 等
+                # Label Masking
                 if role == "assistant":
-                    is_sub_query = content.startswith("SubQuery:")
-                    if self.sub_query_only and not is_sub_query:
-                        # 如果开启了只练子查询模式，则屏蔽非子查询的 Assistant 消息
-                        part_labels = [-100] * len(part_ids)
-                    else:
-                        # 只 Mask 掉 Header 部分 (<|im_start|>assistant\n)
-                        # 保留 Content (含 SubQuery:/Final Answer: 前缀) 和 Footer 的 Loss
-                        part_labels = [-100] * len(header_ids) + content_ids + footer_ids
+                    # Mask the header, train on content + footer (EOS)
+                    part_labels = [-100] * len(header_ids) + content_ids + footer_ids
                 else:
-                    # 对于 User/System/Observation 片段，Loss 全部屏蔽 (-100)
+                    # Mask User / System / Observation
                     part_labels = [-100] * len(part_ids)
                 
                 labels.extend(part_labels)
             
-            # 截断处理
+            # Truncate / Pad
             if len(input_ids) > self.max_len:
+                # Truncate to max_len
                 input_ids = input_ids[:self.max_len]
                 labels = labels[:self.max_len]
             
@@ -117,7 +94,7 @@ class ChainOfRagCollator:
             labels_list.append(labels)
             attention_mask_list.append(attention_mask)
             
-        # 批量 Padding
+        # Padding
         padded = self.tokenizer.pad(
             {"input_ids": input_ids_list, "attention_mask": attention_mask_list},
             padding=True,
@@ -125,7 +102,7 @@ class ChainOfRagCollator:
             return_tensors="pt"
         )
         
-        # 对 Labels 进行手动 Padding (-100)
+        # Pad labels manually with -100
         max_batch_len = padded["input_ids"].shape[1]
         padded_labels = []
         for l in labels_list:
@@ -146,10 +123,6 @@ class ModelArguments:
         default="data/train_with_graph_retrieval.jsonl",
         metadata={"help": "The input training data file (a jsonl file)."}
     )
-    sub_query_only: bool = field(
-        default=False,
-        metadata={"help": "If true, only train on sub-queries and ignore other assistant messages."}
-    )
 
 def train():
     parser = transformers.HfArgumentParser((ModelArguments, Arguments))
@@ -159,6 +132,8 @@ def train():
     print(f"Loading model: {model_args.model_name_or_path}")
     model = AutoModelForCausalLM.from_pretrained(
         model_args.model_name_or_path,
+        torch_dtype=torch.bfloat16,
+        attn_implementation="flash_attention_2",
         trust_remote_code=True
     )
     
@@ -178,11 +153,7 @@ def train():
     dataset = load_dataset("json", data_files=data_files)
     
     # Collator
-    collator = ChainOfRagCollator(
-        tokenizer=tokenizer, 
-        max_len=training_args.max_len,
-        sub_query_only=model_args.sub_query_only
-    )
+    collator = ChainOfRagCollator(tokenizer=tokenizer, max_len=training_args.max_len)
     
     trainer = Trainer(
         model=model,

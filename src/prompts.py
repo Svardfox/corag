@@ -1,14 +1,5 @@
 from typing import List, Dict, Optional
 
-# 统一的系统提示词，与 train.py 保持高度一致
-SYSTEM_PROMPT = (
-    "You are a helpful assistant that can use search tools to solve complex multi-step questions. "
-    "When you receive a question, you should decompose it into several simple sub-queries. "
-    "After receiving the retrieved context for each sub-query, provide a sub-answer. "
-    "Finally, give the final answer based on all information. "
-    "Follow the format strictly: SubQuery, SubAnswer, and Final Answer. /no_think"
-)
-
 def get_generate_subquery_prompt(query: str, past_subqueries: List[str], past_subanswers: List[str], task_desc: str) -> List[Dict]:
     assert len(past_subqueries) == len(past_subanswers)
     
@@ -18,7 +9,7 @@ def get_generate_subquery_prompt(query: str, past_subqueries: List[str], past_su
         past += f"SubQuery: {past_subqueries[idx]}\nSubAnswer: {past_subanswers[idx]}\n"
     past = past.strip()
 
-    prompt = f"""You are decomposing a complex question into simple sub-queries.
+    prompt = f"""You are using a search engine to answer a complex question. Decompose the question into simple sub-queries.
     
 ## Previous Steps
 {past or 'None'}
@@ -29,20 +20,30 @@ def get_generate_subquery_prompt(query: str, past_subqueries: List[str], past_su
 Respond with the next sub-query starting with 'SubQuery: '. Do not explain yourself."""
 
     return [
-        {'role': 'system', 'content': SYSTEM_PROMPT},
         {'role': 'user', 'content': prompt}
     ]
 
 def get_generate_intermediate_answer_prompt(subquery: str, documents: List[str]) -> List[Dict]:
+    """
+    构造生成 SubAnswer 的 prompt，与训练数据格式完全一致（Old Code 逻辑）。
+    
+    单轮 User 消息格式，包含 "Given the following documents..." 指令。
+    """
     context = ''
     for idx, doc in enumerate(documents):
         context += f"Doc {idx+1}: {doc}\n\n"
 
-    # 模拟训练时的 Retrieved Context 格式
+    prompt = f"""Given the following documents retrieved for the sub-query, provide a concise answer.
+
+SubQuery: {subquery}
+
+Retrieved Context:
+{context.strip()}
+
+Answer the sub-query concisely and start with 'SubAnswer: '."""
+
     return [
-        {'role': 'system', 'content': SYSTEM_PROMPT},
-        {'role': 'user', 'content': f"Retrieved Context:\n{context.strip()}"},
-        {'role': 'user', 'content': f"Based on the context above, provide a concise sub-answer for: {subquery}\nRespond starting with 'SubAnswer: '."}
+        {'role': 'user', 'content': prompt}
     ]
 
 def get_generate_final_answer_prompt(
@@ -60,7 +61,7 @@ def get_generate_final_answer_prompt(
         for idx, doc in enumerate(documents):
             context += f"Doc {idx+1}: {doc}\n\n"
 
-    prompt = f"""Combine all information to give the final answer.
+    prompt = f"""Given the following intermediate queries and their answers, provide the final answer to the main question.
 
 ## Search History
 {past.strip()}
@@ -74,6 +75,5 @@ def get_generate_final_answer_prompt(
 Respond starting with 'Final Answer: '."""
 
     return [
-        {'role': 'system', 'content': SYSTEM_PROMPT},
         {'role': 'user', 'content': prompt}
     ]
