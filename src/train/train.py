@@ -33,80 +33,67 @@ class ChainOfRagCollator:
         labels_list = []
         attention_mask_list = []
         
+        im_start_id = self.tokenizer.convert_tokens_to_ids("<|im_start|>")
+        im_end_id = self.tokenizer.convert_tokens_to_ids("<|im_end|>")
+        newline_id = self.tokenizer.encode("\n", add_special_tokens=False)[-1]
+            
+        if im_start_id is None or im_start_id == self.tokenizer.unk_token_id:
+            im_start_id = 151644
+            im_end_id = 151645
+
         for feature in features:
             messages = feature["messages"]
             
             input_ids = []
             labels = []
             
-            # Manual ChatML formatting
-            # TODO: Use the model's official chat template in production
-            # Format: <|im_start|>role\ncontent<|im_end|>\n
+            if self.tokenizer.bos_token_id is not None:
+                input_ids.append(self.tokenizer.bos_token_id)
+                labels.append(-100)
             
             for msg in messages:
                 role = msg["role"]
                 content = msg["content"]
                 
-                # Check for observation mapping
                 if role == "observation":
-                    # Map observation to system or specific observation role if model supports
-                    # We treat it as non-trainable context
-                    role_str = "system" # or "observation"
+                    role_str = "user"
+                    if not content.startswith("Retrieved Context:"):
+                        content = f"Retrieved Context:\n{content}"
                 else:
                     role_str = role
                 
-                # Header
-                header = f"<|im_start|>{role_str}\n"
-                header_ids = self.tokenizer.encode(header, add_special_tokens=False)
+                # 1. Header 拼接: <|im_start|>role\n
+                role_ids = self.tokenizer.encode(role_str, add_special_tokens=False)
+                header_ids = [im_start_id] + role_ids + [newline_id]
                 
-                # Content
+                # 2. Content 拼接
                 content_ids = self.tokenizer.encode(content, add_special_tokens=False)
                 
-                # Footer
-                footer = "<|im_end|>\n"
-                footer_ids = self.tokenizer.encode(footer, add_special_tokens=False)
+                # 3. Footer 拼接: <|im_end|>\n
+                footer_ids = [im_end_id] + [newline_id]
                 
-                # Full specific part
+                # 完整片段 ID 序列
                 part_ids = header_ids + content_ids + footer_ids
                 input_ids.extend(part_ids)
                 
-                # Label Masking
+                # 训练逻辑修复：移除有害的前缀 Mask，确保模型学习如何“开口”输出 SubQuery 等
                 if role == "assistant":
-                    # Determine if this message should be trained at all
                     is_sub_query = content.startswith("SubQuery:")
                     if self.sub_query_only and not is_sub_query:
-                        # Mask everything if in sub_query_only mode and this isn't a sub-query
+                        # 如果开启了只练子查询模式，则屏蔽非子查询的 Assistant 消息
                         part_labels = [-100] * len(part_ids)
                     else:
-                        # Standard training or sub_query_only mode with a sub-query
-                        # Mask the header
-                        part_labels = [-100] * len(header_ids)
-                        
-                        # Shield loss for prefixes: "SubQuery:", "SubAnswer:", "Final Answer:"
-                        prefix = None
-                        for p in ["SubQuery: ", "SubAnswer: ", "Final Answer: "]:
-                            if content.startswith(p):
-                                prefix = p
-                                break
-                        
-                        if prefix:
-                            # Encode prefix to get its token length
-                            prefix_ids = self.tokenizer.encode(prefix, add_special_tokens=False)
-                            # Mask prefix and keep the rest of content + footer
-                            part_labels += [-100] * len(prefix_ids)
-                            part_labels += content_ids[len(prefix_ids):] + footer_ids
-                        else:
-                            # No prefix found, train on full content
-                            part_labels += content_ids + footer_ids
+                        # 只 Mask 掉 Header 部分 (<|im_start|>assistant\n)
+                        # 保留 Content (含 SubQuery:/Final Answer: 前缀) 和 Footer 的 Loss
+                        part_labels = [-100] * len(header_ids) + content_ids + footer_ids
                 else:
-                    # Mask User / System / Observation
+                    # 对于 User/System/Observation 片段，Loss 全部屏蔽 (-100)
                     part_labels = [-100] * len(part_ids)
                 
                 labels.extend(part_labels)
             
-            # Truncate / Pad
+            # 截断处理
             if len(input_ids) > self.max_len:
-                # Truncate to max_len
                 input_ids = input_ids[:self.max_len]
                 labels = labels[:self.max_len]
             
@@ -116,7 +103,7 @@ class ChainOfRagCollator:
             labels_list.append(labels)
             attention_mask_list.append(attention_mask)
             
-        # Padding
+        # 批量 Padding
         padded = self.tokenizer.pad(
             {"input_ids": input_ids_list, "attention_mask": attention_mask_list},
             padding=True,
@@ -124,7 +111,7 @@ class ChainOfRagCollator:
             return_tensors="pt"
         )
         
-        # Pad labels manually with -100
+        # 对 Labels 进行手动 Padding (-100)
         max_batch_len = padded["input_ids"].shape[1]
         padded_labels = []
         for l in labels_list:
