@@ -3,6 +3,7 @@ import sys
 import json
 import logging
 import torch
+import copy
 from dataclasses import dataclass, field
 from typing import Optional, Dict, List
 from datasets import load_dataset
@@ -41,8 +42,21 @@ class ChainOfRagCollator:
             im_start_id = 151644
             im_end_id = 151645
 
+        # 定义系统提示词，包含 /no_think 标签以切换 Thinking 模型模式
+        system_prompt_text = (
+            "You are a helpful assistant that can use search tools to solve complex multi-step questions. "
+            "When you receive a question, you should decompose it into several simple sub-queries. "
+            "After receiving the retrieved context for each sub-query, provide a sub-answer. "
+            "Finally, give the final answer based on all information. "
+            "Follow the format strictly: SubQuery, SubAnswer, and Final Answer. /no_think"
+        )
+
         for feature in features:
-            messages = feature["messages"]
+            messages = copy.deepcopy(feature["messages"])
+            
+            # 动态注入 System Prompt
+            if not (messages and messages[0]["role"] == "system"):
+                messages.insert(0, {"role": "system", "content": system_prompt_text})
             
             input_ids = []
             labels = []

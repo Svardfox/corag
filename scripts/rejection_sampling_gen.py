@@ -288,7 +288,14 @@ def process_example(example: Dict, agent: CoRagAgent, args: argparse.Namespace, 
         try:
             # Sample a path
             # Task desc is usually handled prompt-side or passed here
-            task_desc = "Answer the following question based on the retrieved context."
+            # 统一采样指令，包含 /no_think 标签以对齐模型行为
+            task_desc = (
+                "You are a helpful assistant that can use search tools to solve complex multi-step questions. "
+                "When you receive a question, you should decompose it into several simple sub-queries. "
+                "After receiving the retrieved context for each sub-query, provide a sub-answer. "
+                "Finally, give the final answer based on all information. "
+                "Follow the format strictly: SubQuery, SubAnswer, and Final Answer. /no_think"
+            )
             
             path = agent.sample_path(
                 query=query,

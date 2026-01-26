@@ -203,7 +203,14 @@ def run_custom_eval(args: Arguments):
             logger.warning(f"Skipping item without question: {item}")
             return None
 
-        task_desc = "answer multi-hop questions" # Default
+        # 统一评估指令，包含 /no_think 标签以对齐训练侧行为
+        task_desc = (
+            "You are a helpful assistant that can use search tools to solve complex multi-step questions. "
+            "When you receive a question, you should decompose it into several simple sub-queries. "
+            "After receiving the retrieved context for each sub-query, provide a sub-answer. "
+            "Finally, give the final answer based on all information. "
+            "Follow the format strictly: SubQuery, SubAnswer, and Final Answer. /no_think"
+        )
         
         start_time = time.time()
         
