@@ -32,19 +32,15 @@ class ChainOfRagCollator:
         labels_list = []
         attention_mask_list = []
         
-        im_start_id = self.tokenizer.convert_tokens_to_ids("<|im_start|>")
-        im_end_id = self.tokenizer.convert_tokens_to_ids("<|im_end|>")
-        newline_id = self.tokenizer.encode("\n", add_special_tokens=False)[-1]
-            
-        if im_start_id is None or im_start_id == self.tokenizer.unk_token_id:
-            im_start_id = 151644
-            im_end_id = 151645
-
         for feature in features:
             messages = feature["messages"]
             
             input_ids = []
             labels = []
+            
+            # Manual ChatML formatting
+            # TODO: Use the model's official chat template in production
+            # Format: <|im_start|>role\ncontent<|im_end|>\n
             
             for msg in messages:
                 role = msg["role"]
@@ -58,15 +54,16 @@ class ChainOfRagCollator:
                 else:
                     role_str = role
                 
-                # 1. Header 拼接: <|im_start|>role\n
-                role_ids = self.tokenizer.encode(role_str, add_special_tokens=False)
-                header_ids = [im_start_id] + role_ids + [newline_id]
+                # Header
+                header = f"<|im_start|>{role_str}\n"
+                header_ids = self.tokenizer.encode(header, add_special_tokens=False)
                 
-                # 2. Content 拼接
+                # Content
                 content_ids = self.tokenizer.encode(content, add_special_tokens=False)
                 
-                # 3. Footer 拼接: <|im_end|>\n
-                footer_ids = [im_end_id] + [newline_id]
+                # Footer
+                footer = "<|im_end|>\n"
+                footer_ids = self.tokenizer.encode(footer, add_special_tokens=False)
                 
                 # Full specific part
                 part_ids = header_ids + content_ids + footer_ids
@@ -93,7 +90,7 @@ class ChainOfRagCollator:
             input_ids_list.append(input_ids)
             labels_list.append(labels)
             attention_mask_list.append(attention_mask)
-            
+        
         # Padding
         padded = self.tokenizer.pad(
             {"input_ids": input_ids_list, "attention_mask": attention_mask_list},
@@ -132,8 +129,6 @@ def train():
     print(f"Loading model: {model_args.model_name_or_path}")
     model = AutoModelForCausalLM.from_pretrained(
         model_args.model_name_or_path,
-        torch_dtype=torch.bfloat16,
-        attn_implementation="flash_attention_2",
         trust_remote_code=True
     )
     

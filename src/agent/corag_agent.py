@@ -5,7 +5,7 @@ from copy import deepcopy
 from typing import Optional, List, Dict, Tuple
 from datasets import Dataset
 
-from transformers import PreTrainedTokenizerFast
+from transformers import AutoTokenizer, PreTrainedTokenizerFast
 
 from logger_config import logger
 from vllm_client import VllmClient, get_vllm_model_id
@@ -27,26 +27,10 @@ def _normalize_subquery(subquery: str) -> Tuple[str, Optional[str]]:
     subquery = subquery.strip()
     if subquery.startswith('"') and subquery.endswith('"'):
         subquery = subquery[1:-1]
-    
-    # 核心修复：移除所有可能的历史前缀，确保列表中只存纯内容
-    prefixes = ['SubQuery:', 'Intermediate query:', 'Intermediate query']
-    for p in prefixes:
-        if subquery.startswith(p):
-            subquery = subquery[len(p):].strip()
-            break
+    if subquery.startswith('Intermediate query'):
+        subquery = re.sub(r'^Intermediate query \d+: ', '', subquery)
 
     return subquery, thought
-
-
-def _normalize_subanswer(subanswer: str) -> str:
-    subanswer = subanswer.strip()
-    # 核心修复：移除 SubAnswer 前缀
-    prefixes = ['SubAnswer:', 'Intermediate answer:', 'Intermediate answer']
-    for p in prefixes:
-        if subanswer.startswith(p):
-            subanswer = subanswer[len(p):].strip()
-            break
-    return subanswer
 
 
 class CoRagAgent:
@@ -61,13 +45,16 @@ class CoRagAgent:
         self.final_vllm_client = final_vllm_client
         self.corpus = corpus
         self.graph_api_url = graph_api_url
-        self.tokenizer = tokenizer  # Optional: if None, truncation will use simple char-based method
+        if tokenizer:
+            self.tokenizer = tokenizer
+        else:
+            self.tokenizer: PreTrainedTokenizerFast = AutoTokenizer.from_pretrained(vllm_client.model)
         self.lock = threading.Lock()
 
     def sample_path(
             self, query: str, task_desc: str,
             max_path_length: int = 3,
-            max_message_length: Optional[int] = 4096,
+            max_message_length: int = 4096,
             temperature: float = 0.7,
             **kwargs
     ) -> RagPath:
@@ -104,8 +91,7 @@ class CoRagAgent:
 
             subquery_temp = temperature
             subanswer, doc_ids, documents = self._get_subanswer_and_doc_ids(
-                subquery=subquery,
-                max_message_length=max_message_length
+                subquery=subquery, max_message_length=max_message_length
             )
 
             past_subqueries.append(subquery)
@@ -125,7 +111,7 @@ class CoRagAgent:
 
     def generate_final_answer(
             self, corag_sample: RagPath, task_desc: str,
-            max_message_length: Optional[int] = 4096,
+            max_message_length: int = 4096,
             documents: Optional[List[str]] = None, **kwargs
     ) -> str:
         messages: List[Dict] = get_generate_final_answer_prompt(
@@ -142,26 +128,15 @@ class CoRagAgent:
         client = self.final_vllm_client if self.final_vllm_client else self.vllm_client
         return client.call_chat(messages=messages, **kwargs)
 
-    def _truncate_long_messages(self, messages: List[Dict], max_length: Optional[int]):
-        # Disable truncation if max_length is None or 0
-        if max_length is None or max_length <= 0:
-            return
-        
+    def _truncate_long_messages(self, messages: List[Dict], max_length: int):
         for msg in messages:
             if len(msg['content']) < 2 * max_length:
                 continue
 
-            if self.tokenizer:
-                with self.lock:
-                    msg['content'] = batch_truncate(
-                        [msg['content']], tokenizer=self.tokenizer, max_length=max_length, truncate_from_middle=True
-                    )[0]
-            else:
-                # Fallback: simple character-based truncation (rough estimate: 1 token ≈ 4 chars)
-                char_limit = max_length * 4
-                if len(msg['content']) > char_limit:
-                    half = char_limit // 2
-                    msg['content'] = msg['content'][:half] + "\n...\n" + msg['content'][-half:]
+            with self.lock:
+                msg['content'] = batch_truncate(
+                    [msg['content']], tokenizer=self.tokenizer, max_length=max_length, truncate_from_middle=True
+                )[0]
 
     def sample_subqueries(self, query: str, task_desc: str, n: int = 10, max_message_length: int = 4096, **kwargs) -> List[str]:
         messages: List[Dict] = get_generate_subquery_prompt(
@@ -187,18 +162,6 @@ class CoRagAgent:
             retriever_results = search_by_graph_api(query=subquery, url=self.graph_api_url)
             documents = []
             doc_ids = []
-            # Handle dict response with 'chunks' key (e.g., {"chunks": [...]})
-            if isinstance(retriever_results, dict):
-                if 'chunks' in retriever_results:
-                    retriever_results = retriever_results['chunks']
-                elif 'data' in retriever_results:
-                    retriever_results = retriever_results['data']
-                elif 'results' in retriever_results:
-                    retriever_results = retriever_results['results']
-            # Ensure retriever_results is a list
-            if not isinstance(retriever_results, list):
-                retriever_results = []
-            # Now process as list
             for res in retriever_results:
                 if isinstance(res, str):
                     documents.append(res)
@@ -219,8 +182,7 @@ class CoRagAgent:
         )
         self._truncate_long_messages(messages, max_length=max_message_length)
 
-        subanswer_raw: str = self.vllm_client.call_chat(messages=messages, temperature=0., max_tokens=128)
-        subanswer = _normalize_subanswer(subanswer_raw)
+        subanswer: str = self.vllm_client.call_chat(messages=messages, temperature=0., max_tokens=128)
         return subanswer, doc_ids, documents
 
     def tree_search(
@@ -285,8 +247,7 @@ class CoRagAgent:
                     new_candidate.past_subqueries.append(subquery)
                     new_candidate.past_thoughts.append(None) # Thoughts are not currently captured in tree search expansion
                     subanswer, doc_ids, documents = self._get_subanswer_and_doc_ids(
-                        subquery=subquery,
-                        max_message_length=max_message_length
+                        subquery=subquery, max_message_length=max_message_length
                     )
                     new_candidate.past_subanswers.append(subanswer)
                     new_candidate.past_doc_ids.append(doc_ids)
@@ -313,13 +274,9 @@ class CoRagAgent:
         return candidates[0]
 
     def _eval_single_path(self, current_path: RagPath, max_message_length: int = 4096) -> float:
-        # Old Code 逻辑：使用 current_path.query 作为 subquery，格式化 documents
-        subquery = current_path.query
-        documents = [f'Q: {q}\nA: {a}' for q, a in zip(current_path.past_subqueries, current_path.past_subanswers)]
-        
         messages: List[Dict] = get_generate_intermediate_answer_prompt(
-            subquery=subquery,
-            documents=documents,
+            subquery=current_path.query,
+            documents=[f'Q: {q}\nA: {a}' for q, a in zip(current_path.past_subqueries, current_path.past_subanswers)],
         )
         messages.append({'role': 'assistant', 'content': 'No relevant information found'})
         self._truncate_long_messages(messages, max_length=max_message_length)
