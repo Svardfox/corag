@@ -39,10 +39,12 @@ class CoRagAgent:
             self, vllm_client: VllmClient, corpus: Dataset,
             graph_api_url: Optional[str] = None,
             tokenizer: Optional[PreTrainedTokenizerFast] = None,
-            final_vllm_client: Optional[VllmClient] = None
+            final_vllm_client: Optional[VllmClient] = None,
+            sub_answer_vllm_client: Optional[VllmClient] = None
     ):
         self.vllm_client = vllm_client
         self.final_vllm_client = final_vllm_client
+        self.sub_answer_vllm_client = sub_answer_vllm_client
         self.corpus = corpus
         self.graph_api_url = graph_api_url
         if tokenizer:
@@ -171,6 +173,7 @@ class CoRagAgent:
                     documents.append(content)
                     doc_ids.append(str(res.get('id') or res.get('doc_id') or 'graph_chunk'))
             documents = documents[::-1]
+            print(f"DEBUG: SubQuery='{subquery}', Retrieved {len(documents)} docs.")
         else:
             retriever_results: List[Dict] = search_by_http(query=subquery)
             doc_ids: List[str] = [res['doc_id'] for res in retriever_results]
@@ -182,7 +185,8 @@ class CoRagAgent:
         )
         self._truncate_long_messages(messages, max_length=max_message_length)
 
-        subanswer: str = self.vllm_client.call_chat(messages=messages, temperature=0., max_tokens=128)
+        client = self.sub_answer_vllm_client if self.sub_answer_vllm_client else self.vllm_client
+        subanswer: str = client.call_chat(messages=messages, temperature=0., max_tokens=128)
         return subanswer, doc_ids, documents
 
     def tree_search(

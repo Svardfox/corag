@@ -143,6 +143,20 @@ def run_custom_eval(args: Arguments):
         logger.info(f"Initializing Final Answer VLLM Client ({final_model_id})...")
         final_vllm_client = VllmClient(model=final_model_id, api_base=final_api_base, api_key=final_api_key)
     
+    sub_answer_vllm_client: VllmClient = None
+    if args.sub_answer_model or args.sub_answer_api_base:
+        sub_api_base = args.sub_answer_api_base if args.sub_answer_api_base else args.vllm_api_base
+        sub_api_key = args.sub_answer_api_key if args.sub_answer_api_key else args.vllm_api_key
+        
+        if args.sub_answer_model:
+            sub_model_id = args.sub_answer_model
+        else:
+            logger.info(f"Auto-detecting Sub-Answer Model from {sub_api_base}...")
+            sub_model_id = get_vllm_model_id(api_base=sub_api_base, api_key=sub_api_key)
+        
+        logger.info(f"Initializing Sub-Answer VLLM Client ({sub_model_id})...")
+        sub_answer_vllm_client = VllmClient(model=sub_model_id, api_base=sub_api_base, api_key=sub_api_key)
+    
     logger.info("Loading Corpus...")
     corpus = None
     if args.corpus_file:
@@ -163,7 +177,8 @@ def run_custom_eval(args: Arguments):
         corpus=corpus, 
         graph_api_url=args.graph_api_url, 
         tokenizer=tokenizer,
-        final_vllm_client=final_vllm_client
+        final_vllm_client=final_vllm_client,
+        sub_answer_vllm_client=sub_answer_vllm_client
     )
     # Use the same lock as the agent to ensure thread safety for tokenizer access
     tokenizer_lock: threading.Lock = corag_agent.lock

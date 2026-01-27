@@ -53,6 +53,10 @@ class Arguments(TrainingArguments):
     final_answer_model: Optional[str] = field(default=None, metadata={'help': 'Model ID for final answer generation.'})
     final_answer_api_base: Optional[str] = field(default=None, metadata={'help': 'API base URL for final answer model.'})
     final_answer_api_key: Optional[str] = field(default=None, metadata={'help': 'API key for final answer model.'})
+    
+    sub_answer_model: Optional[str] = field(default=None, metadata={'help': 'Model ID for sub-answer generation.'})
+    sub_answer_api_base: Optional[str] = field(default=None, metadata={'help': 'API base URL for sub-answer model.'})
+    sub_answer_api_key: Optional[str] = field(default=None, metadata={'help': 'API key for sub-answer model.'})
 
     def __post_init__(self):
         super(Arguments, self).__post_init__()
