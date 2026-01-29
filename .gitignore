@@ -17,3 +17,4 @@ output/
 logs/
 wandb/
 old_code/
+old_agent.py

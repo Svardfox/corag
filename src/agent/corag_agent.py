@@ -173,7 +173,6 @@ class CoRagAgent:
                     documents.append(content)
                     doc_ids.append(str(res.get('id') or res.get('doc_id') or 'graph_chunk'))
             documents = documents[::-1]
-            print(f"DEBUG: SubQuery='{subquery}', Retrieved {len(documents)} docs.")
         else:
             retriever_results: List[Dict] = search_by_http(query=subquery)
             doc_ids: List[str] = [res['doc_id'] for res in retriever_results]

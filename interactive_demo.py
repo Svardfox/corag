@@ -33,7 +33,7 @@ def main():
     
     vllm_client: VllmClient = VllmClient(model=model_id, api_base=args.vllm_api_base, api_key=args.vllm_api_key)
     
-    final_vllm_client: VllmClient = None
+    # Final answer model（可选，沿用 custom_batch_eval 逻辑）
     final_vllm_client: VllmClient = None
     if args.final_answer_model or args.final_answer_api_base:
         final_api_base = args.final_answer_api_base if args.final_answer_api_base else args.vllm_api_base
@@ -42,11 +42,26 @@ def main():
         if args.final_answer_model:
             final_model_id = args.final_answer_model
         else:
-             logger.info(f"Auto-detecting Final Answer Model from {final_api_base}...")
-             final_model_id = get_vllm_model_id(api_base=final_api_base, api_key=final_api_key)
+            logger.info(f"Auto-detecting Final Answer Model from {final_api_base}...")
+            final_model_id = get_vllm_model_id(api_base=final_api_base, api_key=final_api_key)
 
         logger.info(f"Initializing Final Answer VLLM Client ({final_model_id})...")
         final_vllm_client = VllmClient(model=final_model_id, api_base=final_api_base, api_key=final_api_key)
+
+    # Sub-answer model（可选，沿用 custom_batch_eval 逻辑）
+    sub_answer_vllm_client: VllmClient = None
+    if args.sub_answer_model or args.sub_answer_api_base:
+        sub_api_base = args.sub_answer_api_base if args.sub_answer_api_base else args.vllm_api_base
+        sub_api_key = args.sub_answer_api_key if args.sub_answer_api_key else args.vllm_api_key
+        
+        if args.sub_answer_model:
+            sub_model_id = args.sub_answer_model
+        else:
+            logger.info(f"Auto-detecting Sub-Answer Model from {sub_api_base}...")
+            sub_model_id = get_vllm_model_id(api_base=sub_api_base, api_key=sub_api_key)
+        
+        logger.info(f"Initializing Sub-Answer VLLM Client ({sub_model_id})...")
+        sub_answer_vllm_client = VllmClient(model=sub_model_id, api_base=sub_api_base, api_key=sub_api_key)
     
     logger.info("Loading Corpus...")
     if args.corpus_file:
@@ -65,16 +80,17 @@ def main():
             sys.exit(1)
         else:
             raise e
-            raise e
     corag_agent: CoRagAgent = CoRagAgent(
         vllm_client=vllm_client, 
         corpus=corpus, 
         graph_api_url=args.graph_api_url, 
         tokenizer=tokenizer,
-        final_vllm_client=final_vllm_client
+        final_vllm_client=final_vllm_client,
+        sub_answer_vllm_client=sub_answer_vllm_client,
     )
     
-    tokenizer_lock: threading.Lock = threading.Lock()
+    # 与 custom_batch_eval 一致，复用 agent 内部的 tokenizer 锁
+    tokenizer_lock: threading.Lock = corag_agent.lock
 
     if args.max_path_length < 1:
         args.decode_strategy = 'greedy'
