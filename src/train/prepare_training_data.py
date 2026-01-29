@@ -130,7 +130,8 @@ if __name__ == "__main__":
     parser.add_argument("--dataset", type=str, required=True, help="Path to input jsonl file")
     parser.add_argument("--output_file", type=str, default="data/train_with_context.jsonl", help="Output path")
     parser.add_argument("--graph_api_url", type=str, default="http://localhost:8025/retrieve")
-    parser.add_argument("--retrieve", action="store_true", help="Actually perform retrieval")
+    # 默认开启检索，如需关闭可在代码中修改或后续扩展为 --no_retrieve 参数
+    parser.add_argument("--retrieve", action="store_true", default=True, help="Actually perform retrieval")
     parser.add_argument("--top_k", type=int, default=3, help="Max documents per step")
     parser.add_argument("--num_workers", type=int, default=10, help="Parallel threads")
     
