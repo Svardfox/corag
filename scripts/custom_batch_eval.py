@@ -278,10 +278,13 @@ def run_custom_eval(args: Arguments):
             # B. CoRAG Recall
             # unique_documents contains the set of documents retrieved by CoRAG
             c_hits, c_total = check_hit(unique_documents, golden_facts)
+            c_retrieved = len(unique_documents)
             corag_recall_info = {
                 "hits": c_hits,
                 "total": c_total,
-                "recall": c_hits / c_total if c_total > 0 else 0.0
+                "retrieved": c_retrieved,
+                "recall": c_hits / c_total if c_total > 0 else 0.0,
+                "precision": c_hits / c_retrieved if c_retrieved > 0 else 0.0
             }
             
             # C. Naive Retrieval Recall
@@ -317,10 +320,13 @@ def run_custom_eval(args: Arguments):
                 naive_docs = naive_docs[:args.num_contexts]
                 
                 n_hits, n_total = check_hit(naive_docs, golden_facts)
+                n_retrieved = len(naive_docs)
                 naive_recall_info = {
                     "hits": n_hits,
                     "total": n_total,
+                    "retrieved": n_retrieved,
                     "recall": n_hits / n_total if n_total > 0 else 0.0,
+                    "precision": n_hits / n_retrieved if n_retrieved > 0 else 0.0,
                     "retrieved_docs": naive_docs # Optional: save retrieved docs for debugging
                 }
 
@@ -407,6 +413,8 @@ def run_custom_eval(args: Arguments):
     total_corag_hits = 0
     total_naive_hits = 0
     total_gold_chunks = 0
+    total_corag_retrieved = 0
+    total_naive_retrieved = 0
     
     for res in processed_results:
         t = res["time"]
@@ -420,10 +428,12 @@ def run_custom_eval(args: Arguments):
             total_gold_chunks += res["corag_recall"]["total"] # Summing total gold chunks across all questions?
             # Or should we average per-question recall?
             # User said: "命中所有题目的golden chunks/总共golden chunks取平均" -> Micro Recall
+            total_corag_retrieved += res["corag_recall"].get("retrieved", 0)
             
         if args.calc_recall and args.enable_naive_retrieval and res.get("naive_recall"):
             total_naive_hits += res["naive_recall"]["hits"]
             # total_gold_chunks is same for both
+            total_naive_retrieved += res["naive_recall"].get("retrieved", 0)
             
     num_samples = len(processed_results)
     avg_summary = {
@@ -437,10 +447,13 @@ def run_custom_eval(args: Arguments):
     
     if args.calc_recall:
         avg_summary["corag_micro_recall"] = total_corag_hits / total_gold_chunks if total_gold_chunks > 0 else 0.0
+        avg_summary["corag_micro_precision"] = total_corag_hits / total_corag_retrieved if total_corag_retrieved > 0 else 0.0
         if args.enable_naive_retrieval:
              avg_summary["naive_micro_recall"] = total_naive_hits / total_gold_chunks if total_gold_chunks > 0 else 0.0
+             avg_summary["naive_micro_precision"] = total_naive_hits / total_naive_retrieved if total_naive_retrieved > 0 else 0.0
     
-    processed_results.insert(0, avg_summary)
+    if processed_results:
+        processed_results[0]["summary"] = avg_summary
     
     # Save results
     logger.info(f"Saving results to {args.save_file}...")
