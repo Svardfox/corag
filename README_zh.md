@@ -1,8 +1,7 @@
 ## CoRAG：Chain-of-Retrieval Augmented Generation
 
 [English version](README.md) | 中文说明
-
-本仓库实现了论文 *“Chain-of-Retrieval Augmented Generation”*（CoRAG，链式检索增强生成，`https://arxiv.org/abs/2501.14342`）中的方法。  
+  
 CoRAG 主要支持三条完整工作流：
 
 - **数据集构造**：生成多步推理轨迹，并为每一步补充检索到的上下文。
@@ -160,7 +159,7 @@ CoRAG 通过 `src/vllm_client.py` 中的 `VllmClient` 使用该 API，主要出�
 
 #### 推荐响应格式
 
-推荐返回以下任意一种响应形态，**检索客户端会统一解析**（训练与 CoRAG agent 都适用）：
+推荐返回一个带有 `chunks` 字段的 JSON 对象：
 
 ```json
 {
@@ -184,7 +183,7 @@ CoRAG 通过 `src/vllm_client.py` 中的 `VllmClient` 使用该 API，主要出�
 
 #### 其他兼容响应形态
 
-检索客户端对返回结构有较强的容错能力，同时也接受：
+预处理脚本对返回结构有较强的容错能力，同时也接受：
 
 - **字符串列表**：
 
@@ -215,13 +214,13 @@ CoRAG 通过 `src/vllm_client.py` 中的 `VllmClient` 使用该 API，主要出�
 }
 ```
 
-检索客户端会按以下逻辑统一解析：
+`prepare_training_data.py` 会按以下逻辑统一解析：
 
 - 依次检查 `["chunks", "data", "results", "docs", "passages"]` 这些 key 是否存在且对应为列表。
 - 若未找到列表，则在必要时将单个对象封装为列表。
 - 对每个元素依次从 `contents` → `content` → `text` → `str(doc)` 中提取文本。
 
-只要你的检索服务返回满足上述任意一种形态，CoRAG（训练与推理）都能正常消费结果。
+只要你的检索服务返回满足上述任意一种形态，CoRAG 就能正常消费结果。
 
 ---
 
@@ -532,3 +531,4 @@ python interactive_demo.py \
   - 若加载 tokenizer 失败（例如 vLLM 只在远端有权重），可以通过 `--tokenizer_name` 显式指定一个可从 HuggingFace 下载的 tokenizer repo。
 
 更多训练细节可参考 `src/train/train.py` 与 `src/train/README.md` 中的注释及说明。
+

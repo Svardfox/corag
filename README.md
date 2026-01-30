@@ -2,7 +2,6 @@
 
 English version | [中文说明](README_zh.md)
 
-This repository contains the reference implementation of **Chain-of-Retrieval Augmented Generation (CoRAG)** from the paper *“Chain-of-Retrieval Augmented Generation”* (`https://arxiv.org/abs/2501.14342`).  
 CoRAG supports three main workflows:
 
 - **Dataset construction**: generate multi-step reasoning traces and enrich them with retrieved contexts.
@@ -161,7 +160,7 @@ To make all components work smoothly, the retrieval API **should** follow this c
 
 #### Response (recommended format)
 
-You can return any of the following shapes; **the retrieval client normalizes them** (applies to both training and the CoRAG agent):
+The recommended response is a JSON object with a `chunks` field:
 
 ```json
 {
@@ -185,7 +184,7 @@ Each element in `chunks`:
 
 #### Other supported shapes
 
-The retrieval client is robust and will also accept:
+The preprocessing scripts are robust and will also accept:
 
 - A **list of strings**:
 
@@ -216,13 +215,13 @@ The retrieval client is robust and will also accept:
 }
 ```
 
-The retrieval client normalizes the response by:
+`prepare_training_data.py` normalizes the response by:
 
 - Looking for list-valued keys in `["chunks", "data", "results", "docs", "passages"]`.
 - Falling back to wrapping a single object into a list when needed.
 - Extracting each document’s text from `contents` → `content` → `text` → `str(doc)`.
 
-As long as your API conforms to one of the above patterns, CoRAG (training and inference) can consume it.
+As long as your API conforms to one of the above patterns, CoRAG will be able to consume it.
 
 ---
 
@@ -765,3 +764,4 @@ The output is a JSONL file where each line is a valid sample containing:
 - `query`: The original question.
 - `generated_final_answer`: The agent's correct answer.
 - `steps`: A list of reasoning steps, each containing `subquery`, `subanswer`, and `thought`.
+
