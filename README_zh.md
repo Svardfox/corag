@@ -1,234 +1,534 @@
-# CoRAG: Chain-of-Retrieval Augmented Generation
+## CoRAG：Chain-of-Retrieval Augmented Generation
 
-[English Version](README.md) | [中文版](README_zh.md)
+[English version](README.md) | 中文说明
 
-本仓库提供了 [Chain-of-Retrieval Augmented Generation](https://arxiv.org/abs/2501.14342) (CoRAG) 的实现代码。本项目支持推理 (Agentic RAG)、训练以及数据集构建。
+本仓库实现了论文 *“Chain-of-Retrieval Augmented Generation”*（CoRAG，链式检索增强生成，`https://arxiv.org/abs/2501.14342`）中的方法。  
+CoRAG 主要支持三条完整工作流：
 
-## 项目结构 (Project Structure)
+- **数据集构造**：生成多步推理轨迹，并为每一步补充检索到的上下文。
+- **模型训练**：基于 CoRAG 风格的监督信号微调大模型。
+- **QA 评测**：使用 CoRAG agent 进行批量和交互式问答评测。
+
+整个代码假定外部已部署好：
+
+- 一个提供 **OpenAI 兼容 API** 的 **vLLM 服务**。
+- 一个可提供文本检索结果的 **检索服务**（Graph / HTTP 检索 API）。
+
+---
+
+## 项目结构
 
 ```text
 corag/
 ├── src/
-│   ├── agent/           # CoRAG 智能体逻辑 (路径生成, 树搜索等)
-│   ├── inference/       # 推理工具及指标计算
-│   ├── search/          # 检索客户端 (Graph API, HTTP)
-│   ├── train/           # 训练脚本 (数据准备, SFT 循环)
-│   ├── config.py        # 全局配置参数
-│   └── vllm_client.py   # 与 VLLM 服务器通信的客户端
+│   ├── agent/                # CoRAG 智能体实现及工具
+│   │   ├── corag_agent.py
+│   │   └── agent_utils.py
+│   ├── train/                # 训练与数据准备脚本
+│   │   ├── train.py
+│   │   ├── run_training.sh
+│   │   ├── prepare_training_data.py
+│   │   └── prepare_aligned_data.py
+│   ├── config.py             # 全局 CLI 配置（Arguments dataclass）
+│   ├── vllm_client.py        # OpenAI 兼容的 vLLM 客户端
+│   ├── data_utils.py         # 语料加载与 context 格式化
+│   ├── prompts.py            # CoRAG 用到的 Prompt 模板
+│   ├── utils.py              # 工具函数（如 AtomicCounter）
+│   └── logger_config.py      # 日志配置
 ├── scripts/
-│   ├── custom_batch_eval.py    # 批量评测主脚本
-│   ├── rejection_sampling_gen.py # 推理轨迹生成脚本
-│   └── start_vllm_server.sh    # 启动 VLLM 的辅助脚本
-├── interactive_demo.py  # 用于测试单条查询的交互式 CLI
-└── requirements.txt     # Python 依赖
+│   ├── rejection_sampling_gen.py   # 使用拒绝采样生成 CoRAG 推理路径
+│   └── custom_batch_eval.py        # 使用 CoRAG 的批量 QA 评测脚本
+├── interactive_demo.py       # 单样本交互式 QA Demo（命令行）
+├── requirements.txt          # Python 依赖
+└── images/
+    └── corag_framework.png   # CoRAG 框架示意图
 ```
 
-# 第一部分：推理 (Agentic RAG)
+---
 
-本章节详细介绍如何运行 CoRAG 智能体进行推理，包括环境配置、参数说明、运行交互式 Demo 以及执行批量评测。
+## 环境依赖与安装
 
-## 1. 环境配置 (Environment Setup)
+- **Python**：建议 3.9+
+- **GPU**：需要支持 CUDA 的 GPU 以运行 vLLM 和训练
 
-### 软件依赖
-请使用提供的 `requirements.txt` 安装必要的 Python 依赖包：
+安装 Python 依赖：
 
 ```bash
 pip install -r requirements.txt
 ```
 
-核心依赖包括：
-- `vllm`: 用于高效的大模型服务部署。
-- `transformers`, `torch`: 核心深度学习库。
-- `flash-attn`: 用于加速 Attention 计算。
+主要依赖：
 
-### 服务端要求
-CoRAG 依赖两个外部服务：LLM 服务器和检索 (Retrieval) 服务器（Graph API 或自定义服务）。
-
-#### A. LLM 服务器 (VLLM)
-你需要运行一个 VLLM 服务器来处理生成请求。
-可以使用提供的脚本启动 VLLM 服务器：
-```bash
-# 在 8000 端口启动指定模型的 VLLM 服务
-bash scripts/start_vllm_server.sh <model_name_or_path>
-```
-默认 URL: `http://localhost:8000/v1`
-
-#### B. 检索服务器 (Retrieval Server)
-你需要一个服务来处理文档检索。这应该是自定义的 Graph API。
-默认 URL: `http://localhost:8023/retrieve`
-
-> [!NOTE]
-> **自定义搜索 API 返回格式 (Custom Search API Response Format)**
-> 检索服务器必须接受包含 `{"query": "your query"}` 的 JSON POST 请求，并返回一个字符串列表（即检索到的段落）。
-> 
-> **Request:**
-> `POST /retrieve`
-> ```json
-> {
->   "query": "What is the capital of France?"
-> }
-> ```
-> 
-> **Response:**
-> ```json
-> [
->   "Paris is the capital and most populous city of France.",
->   "France is a country located in Western Europe."
-> ]
-> ```
+- **vllm**：用于提供 OpenAI 风格的高性能推理服务。
+- **transformers**、**torch**：深度学习基础库。
+- **datasets**：数据集加载与处理。
+- **deepspeed**：大模型分布式训练（ZeRO-3）。
 
 ---
 
-## 2. 配置参数 (Configuration Parameters)
+## 外部服务
 
-系统可以通过命令行参数进行高度配置。`src/config.py` 中的关键参数包括：
+CoRAG 依赖两个外部服务：
 
-### 模型与 API 配置
-- `--vllm_api_base`: VLLM API 的 URL (默认: `http://localhost:8000/v1`)。
-- `--vllm_api_key`: VLLM 的 API Key (默认: `token-123`)。
-- `--vllm_model`: 指定使用的模型名称。
-- `--graph_api_url`: 检索服务的 URL (例如: `http://localhost:8023/retrieve`)。
-- `--corpus_file`:用于将检索到的 ID 映射到文本的语料库 JSON 文件路径。
+- **vLLM 服务**：负责所有生成调用（OpenAI 风格接口）。
+- **检索服务**：根据子问题返回候选文档。
 
-### 推理策略
-- `--task_desc`: 智能体的任务描述 (默认: "answer multi-hop questions")。
-- `--max_path_length`: 允许的最大推理步数 (深度)。
-- `--decode_strategy`: 路径生成策略。选项包括：
-  - `greedy`: 贪婪策略，总是选择可能性最大的下一步。
-  - `tree_search`: 树搜索，探索多个分支。
-  - `best_of_n`: 采样 `n` 条路径并选择最好的一条。
-- `--sample_temperature`: 树搜索或 best-of-n 策略中的采样温度。
-- `--best_n`: `best_of_n` 策略中采样的路径数量。
+二者都通过 `src/config.py` 中的 `Arguments` dataclass 所定义的命令行参数进行配置。
 
-### 检索设置
-- `--num_contexts`: 每步检索的文档数量 (默认: 20)。
-- `--num_threads`: 批量评测时的并行检索线程数 (默认: 32)。
+### vLLM 服务 API
 
----
+vLLM 服务需要实现 **OpenAI 兼容** 的 REST API：
 
-## 3. 交互式 Demo 脚本 (Interactive Demo Script)
+- 基础地址（示例）：`http://localhost:8000/v1`
+- 认证头：`Authorization: Bearer <API_KEY>`
 
-`interactive_demo.py` 脚本允许你与 CoRAG 智能体进行实时对话。它会展示智能体的“思考”过程，包括中间查询、检索到的文档以及思考内容。
+#### Chat Completions
 
-### 使用方法
-```bash
-python interactive_demo.py \
-    --vllm_api_base http://localhost:8000/v1 \
-    --graph_api_url http://localhost:8023/retrieve \
-    --corpus_file data/corpus.json \
-    --max_path_length 3 \
-    --decode_strategy greedy
+- **Endpoint**：`POST /v1/chat/completions`
+- **请求示例**：
+
+```json
+{
+  "model": "Qwen/Qwen2.5-7B-Instruct",
+  "messages": [
+    {"role": "system", "content": "You are a helpful assistant."},
+    {"role": "user", "content": "What is CoRAG?"}
+  ],
+  "temperature": 0.7,
+  "max_tokens": 256
+}
 ```
 
-### 功能特性
-- **实时推理**: 展示子问题 (SubFor) 和子答案 (SubAnswer) 生成的每一步。
-- **可追踪性**: 显示每一步主要检索到了哪些文档。
-- **灵活测试**: 允许快速测试不同的问题，无需运行完整的 benchmark。
+- **响应结构（简化）**：
 
----
-
-## 4. 批量评测脚本 (Batch Evaluation Script)
-
-对于大规模评测，请使用 `scripts/custom_batch_eval.py`。该脚本处理问题数据集，计算指标（如 Recall），并保存结果。
-
-### 使用方法
-```bash
-python scripts/custom_batch_eval.py \
-    --eval_file data/my_questions.json \
-    --save_file results/my_results.json \
-    --corpus_file data/corpus.json \
-    --calc_recall \
-    --num_threads 16
+```json
+{
+  "id": "chatcmpl-xxx",
+  "object": "chat.completion",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "CoRAG (Chain-of-Retrieval Augmented Generation) is ..."
+      }
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 50,
+    "completion_tokens": 120,
+    "total_tokens": 170
+  }
+}
 ```
 
-### 输入格式 (`--eval_file`)
-输入应为包含字典的 JSON 列表。每个字典必须至少包含 `question` 字段。
+CoRAG 通过 `src/vllm_client.py` 中的 `VllmClient` 使用该 API，主要出现在：
+
+- `scripts/rejection_sampling_gen.py`
+- `scripts/custom_batch_eval.py`
+- `interactive_demo.py`
+- `src/agent/corag_agent.py`
+
+### 检索 API 规范
+
+检索服务用于根据子问题返回支撑文档，通过 `graph_api_url` 访问（例如 `http://localhost:8023/retrieve`），在以下脚本中被调用：
+
+- `scripts/rejection_sampling_gen.py`（由 `CoRagAgent` 间接调用）
+- `src/train/prepare_training_data.py`
+- `scripts/custom_batch_eval.py`
+- `interactive_demo.py`
+
+为保证所有组件都能正常工作，建议检索 API 遵循以下约定。
+
+#### 请求格式
+
+- **方法**：`POST`
+- **路径**：`/retrieve`（完整 URL 由 `graph_api_url` 配置）
+- **推荐请求体**：
+
+```json
+{
+  "query": "What is the capital of France?",
+  "top_k": 20
+}
+```
+
+- **字段说明**：
+  - **`query`**（string，必选）：自然语言查询或子问题。
+  - **`top_k`**（int，可选）：希望返回的文档数量上限。  
+    例如 `prepare_training_data.py` 本身也会通过 `--top_k` 控制截断，服务端可以选择参考或忽略该字段。
+
+#### 推荐响应格式
+
+推荐返回以下任意一种响应形态，**检索客户端会统一解析**（训练与 CoRAG agent 都适用）：
+
+```json
+{
+  "chunks": [
+    {
+      "id": "wiki_123",
+      "contents": "Paris is the capital and most populous city of France."
+    },
+    {
+      "id": "wiki_456",
+      "contents": "France is a country located in Western Europe ..."
+    }
+  ]
+}
+```
+
+其中 `chunks` 中每个元素：
+
+- **`id`**（string，可选但推荐）：文档唯一标识。
+- **`contents`**（string，推荐），或 **`content`** / **`text`**：具体文档内容。
+
+#### 其他兼容响应形态
+
+检索客户端对返回结构有较强的容错能力，同时也接受：
+
+- **字符串列表**：
+
 ```json
 [
-    {
-        "question": "Who is the director of the movie related to...",
-        "answer": "Target Answer"  // 可选，用于对比参考
-    }
+  "Paris is the capital and most populous city of France.",
+  "France is a country located in Western Europe ..."
 ]
 ```
 
-### 关键参数
-- `--eval_file`: 输入 JSON 数据集的路径。
-- `--save_file`: 输出 JSON 结果的保存路径。
-- `--calc_recall`: 如果设置，将计算检索召回率指标 (输入中需要包含 `answer` 或 golden facts)。
-- `--enable_naive_retrieval`: 如果设置，还将运行基线“朴素”检索 (单步) 进行比较。
-- `--num_threads`: 用于加速处理的并发线程数。
+- **对象列表**（带 `contents` / `content` / `text` 字段）：
 
-### 输出结果
-输出文件包含：
-1. **汇总对象 (Summary Object)**: 位于顶部的聚合统计信息 (平均时间, Micro Recall 等)。
-2. **单项结果 (Per-Item Results)**: 每个问题的详细追踪信息，包括：
-   - `reasoning_steps`: (子问题, 子答案) 列表。
-   - `corag_recall`: CoRAG 的 Hits 和 Total recall。
-   - `naive_recall`: Naive baseline 的 Hits 和 Total recall (如果启用)。
+```json
+[
+  {"text": "Paris is the capital and most populous city of France."},
+  {"text": "France is a country located in Western Europe ..."}
+]
+```
 
-# 第二部分：训练 (Training)
+- **包含列表字段的对象**：
 
-本章节介绍如何使用 CoRAG 方法对模型进行全量微调 (SFT)。
+```json
+{
+  "results": [
+    {"contents": "..."},
+    {"contents": "..."}
+  ]
+}
+```
 
-## 训练流程 (Training Process)
+检索客户端会按以下逻辑统一解析：
 
-核心训练逻辑实现于 `src/train/train.py`。我们提供了一个 Shell 脚本 `src/train/run_training.sh` 来简化流程。
+- 依次检查 `["chunks", "data", "results", "docs", "passages"]` 这些 key 是否存在且对应为列表。
+- 若未找到列表，则在必要时将单个对象封装为列表。
+- 对每个元素依次从 `contents` → `content` → `text` → `str(doc)` 中提取文本。
 
-### 功能特性
-*   **CoRAG Masking 策略**: 模型被训练用于生成 *推理路径* (子问题, 子答案, 最终答案)。我们仅计算这些生成部分的 Loss。*用户查询* 和 *检索到的文档* (外部知识) 会被 Mask 掉 (loss=0)。
-*   **DeepSpeed 支持**: 默认配置使用 DeepSpeed ZeRO-3，以便在多 GPU 环境下高效利用显存。
+只要你的检索服务返回满足上述任意一种形态，CoRAG（训练与推理）都能正常消费结果。
 
-### 运行训练
+---
+
+## 通过 `src/config.py` 进行统一配置
+
+全局运行配置由 `src/config.py` 中的 `Arguments` dataclass 定义，并继承自 HuggingFace 的 `TrainingArguments`。  
+常用且同时被训练与评测脚本使用的重要字段包括：
+
+- **模型与 vLLM**
+  - `--vllm_api_base`：vLLM API 基地址（默认 `http://localhost:8000/v1`）。
+  - `--vllm_api_key`：vLLM API Key（默认 `token-123`）。
+  - `--vllm_model`：vLLM 模型名称 / ID（可选；若为空则自动从 `/models` 中探测）。
+  - `--tokenizer_name`：Tokenizer 对应的 Repo 名或路径（默认与 vLLM 模型 ID 一致）。
+- **检索相关**
+  - `--graph_api_url`：检索服务地址（如 `http://localhost:8023/retrieve`）。
+  - `--corpus_file`：用于将文档 ID 映射为文本的语料库 JSON 文件路径（部分模式下使用）。
+  - `--num_contexts`：每个样本使用的最大上下文数（默认 20）。
+- **Agent 行为**
+  - `--max_path_length`：最大推理步数（路径长度）。
+  - `--decode_strategy`：`greedy` | `tree_search` | `best_of_n`。
+  - `--sample_temperature`：非贪心策略下的采样温度。
+  - `--best_n`：`best_of_n` 策略下采样的路径数量。
+- **执行相关**
+  - `--num_threads`：并行线程数（用于评测与检索）。
+  - `--max_len`：最终回答阶段的最大输入长度。
+
+你可以在以下脚本中直接使用这些参数：
+
+- `scripts/custom_batch_eval.py`
+- `interactive_demo.py`
+- `src/train/train.py`（通常通过 `run_training.sh` 间接传入）
+
+---
+
+## 工作流一：数据集构造
+
+数据集构造流水线分为三个阶段：
+
+1. **准备原始 QA 数据集**：至少包含 `query` 和 `answers` 字段。
+2. **运行拒绝采样**：使用 CoRAG agent 生成多条推理路径，只保留答案正确的路径。
+3. **补充检索上下文并对监督信号进行拆分对齐**：得到可直接训练的监督样本。
+
+### 1.1 准备原始数据集
+
+要求每个样本至少包含：
+
+- **`query`**：用户问题。
+- **`answers`**：可接受答案的字符串列表。
+
+常见做法：
+
+- 直接使用现成的 HF 数据集（如 `corag/multihopqa`，`subset=2wikimultihopqa`）。
+- 将自定义数据集转为 JSONL，每行一个 JSON 对象：
+
+```json
+{"query": "Who is the CEO of OpenAI?", "answers": ["Sam Altman"]}
+```
+
+### 1.2 使用拒绝采样生成推理路径
+
+通过 `scripts/rejection_sampling_gen.py`，使用 CoRAG agent 在数据集上采样多条推理路径，并只保留最终答案正确的路径。
+
+示例（使用 HF 数据集）：
+
+```bash
+python scripts/rejection_sampling_gen.py \
+  --dataset corag/multihopqa \
+  --subset 2wikimultihopqa \
+  --split train \
+  --output_file data/rejection_sampled_data.jsonl \
+  --vllm_api_base http://localhost:8000/v1 \
+  --vllm_api_key token-123 \
+  --graph_api_url http://localhost:8023/retrieve \
+  --n_samples 5 \
+  --temperature 0.7 \
+  --max_path_length 3
+```
+
+输出文件 `data/rejection_sampled_data.jsonl` 是一个 JSONL，每行一个 CoRAG 有效样本，包含（简化）：
+
+- `id`：样本 ID。
+- `query`：原始问题。
+- `answers`：标准答案列表。
+- `generated_final_answer`：被判定为正确的模型最终回答。
+- `steps`：推理步骤列表，每个步骤包含：
+  - `subquery`
+  - `subanswer`
+  - 可选 `thought`。
+
+此阶段 **未必包含完整检索上下文文本**，下一步会补齐。
+
+### 1.3 补充检索上下文
+
+`src/train/prepare_training_data.py` 会将拒绝采样得到的样本转为 ChatML 风格对话，并**实际调用检索 API**，为每个 `subquery` 填入对应的检索上下文。
+
+示例：
+
+```bash
+python src/train/prepare_training_data.py \
+  --dataset data/rejection_sampled_data.jsonl \
+  --output_file data/train_with_context.jsonl \
+  --graph_api_url http://localhost:8023/retrieve \
+  --top_k 3 \
+  --num_workers 10 \
+  --retrieve
+```
+
+输入要求：
+
+- 来自 `rejection_sampling_gen.py` 的 JSONL，包含 `query`、`steps` 和 `generated_final_answer` 等字段。
+
+输出 `data/train_with_context.jsonl`：
+
+- 每行一个对象，主要字段为 `messages`（ChatML 格式），大致形如：
+  - `{"role": "user", "content": "<original query>"}`  
+  - 对于每个推理步骤：
+    - `{"role": "assistant", "content": "SubQuery: <subquery>"}`  
+    - `{"role": "observation", "content": "Retrieved Context:\nDoc 1: ...\nDoc 2: ..."}`  
+    - `{"role": "assistant", "content": "SubAnswer: <subanswer>"}`  
+  - 最终答案：
+    - `{"role": "assistant", "content": "Final Answer: <answer>"}`。
+
+该文件即为**已补充检索上下文的对话式数据集**。
+
+### 1.4 构建对齐监督样本
+
+`src/train/prepare_aligned_data.py` 会把每条对话拆分为多个**类型明确的监督样本**：
+
+- `subquery_generation`
+- `subanswer_generation`
+- `final_answer_generation`
+
+每个样本都是一段 ChatML 对话：
+
+- **输入** 由前面的若干 `system` / `user` / `assistant` / `observation` 消息编码。
+- **监督目标** 是单条 `assistant` 消息（如 `SubQuery: ...`）。
+
+示例：
+
+```bash
+python src/train/prepare_aligned_data.py \
+  --input_file data/train_with_context.jsonl \
+  --output_file data/aligned_train.jsonl
+```
+
+输出 `data/aligned_train.jsonl`：
+
+- 每行一个 JSON，包含：
+  - `type`：`subquery_generation` / `subanswer_generation` / `final_answer_generation`。
+  - `messages`：完整的 ChatML 消息列表（包含 Prompt 与金标回答）。
+
+这是后续监督微调使用的**最终训练数据集**。
+
+---
+
+## 工作流二：模型训练
+
+训练逻辑位于 `src/train/train.py`，直接消费上述对齐后的训练数据。  
+我们提供了一个默认的启动脚本 `src/train/run_training.sh` 以简化使用。
+
+### 2.1 训练命令示例
+
+默认的 `run_training.sh` 使用 DeepSpeed ZeRO-3 在多卡上训练：
+
 ```bash
 bash src/train/run_training.sh
 ```
 
-### 关键训练参数
-脚本使用标准的 Hugging Face `TrainingArguments`。`src/train/run_training.sh` 中的重要参数包括：
-
-*   `--train_file`: 准备好的 JSONL 训练数据路径。
-*   `--model_name_or_path`: 用于微调的基座模型 (例如 `Qwen/Qwen2.5-7B-Instruct`)。
-*   `--output_dir`: 保存 Checkpoints 和 Logs 的目录。
-*   `--learning_rate`: 默认值为 `2e-5`。
-*   `--num_train_epochs`: 默认值为 `3`。
-*   `--gradient_accumulation_steps`: 调整此参数以达到预期的有效 Batch Size。
-*   `--bf16`: 强烈建议在较新的 GPU (A100/H100) 上开启，以节省显存并提高稳定性。
-
-# 第三部分：数据集构造 (Dataset Construction)
-
-本章节包含用于构建训练数据集的工具，可以通过格式化现有 Benchmark 数据或通过拒绝采样生成新的推理路径。
-
-## 拒绝采样策略 (Rejection Sampling Strategy)
-
-为了训练 CoRAG 模型，我们需要包含 (问题, 推理路径, 答案) 的数据。由于标准数据集仅提供 (问题, 答案)，我们使用 CoRAG 智能体探索多条推理路径，并仅保留包含正确答案的路径。
-
-### 脚本: `scripts/rejection_sampling_gen.py`
-
-此脚本在数据集上运行 CoRAG 智能体，对每个问题进行多次路径采样，并将最终答案与标准答案 (Ground Truth) 进行验证。
-
-#### 使用方法
+脚本内部等价于执行：
 
 ```bash
-python scripts/rejection_sampling_gen.py \
-    --dataset corag/multihopqa \
-    --split train \
-    --output_file data/rejection_sampled_data.jsonl \
-    --n_samples 5 \
-    --temperature 0.7 \
-    --max_path_length 3 \
-    --vllm_url http://localhost:8000 \
-    --graph_api_url http://localhost:8023/retrieve
+torchrun --nproc_per_node 8 src/train/train.py \
+  --model_name_or_path Qwen/Qwen2.5-7B-Instruct \
+  --train_file data/train_with_graph_retrieval.jsonl \
+  --output_dir output/corag_qwen_finetuned \
+  --num_train_epochs 3 \
+  --per_device_train_batch_size 1 \
+  --gradient_accumulation_steps 8 \
+  --gradient_checkpointing True \
+  --deepspeed src/train/ds_config_zero3.json \
+  --learning_rate 2e-5 \
+  --max_len 4096 \
+  --do_train \
+  --save_steps 500 \
+  --logging_steps 10 \
+  --report_to wandb \
+  --bf16 True \
+  --overwrite_output_dir
 ```
 
-#### 关键参数
-- `--n_samples`: 每个问题采样的推理路径数量。
-- `--temperature`: 采样温度，用于增加多样性。
-- `--output_file`: 有效路径的保存位置。
-- `--max_path_length`: 最大推理深度。
+你通常需要：
 
-#### 输出格式
-输出为一个 JSONL 文件，每一行是一个包含有效路径的样本，包含：
-- `query`: 原始问题。
-- `generated_final_answer`: 智能体生成的正确答案。
-- `steps`: 推理步骤列表，每步包含 `subquery` (子问题), `subanswer` (子答案) 和 `thought` (思考)。
+- 将 `--train_file` 指向自己准备好的训练数据（例如 `data/aligned_train.jsonl` 或 `data/train_with_graph_retrieval.jsonl`，取决于你的设置）。
+- 根据设备情况调整 `--model_name_or_path`、`--output_dir`、DeepSpeed 配置以及各类训练超参。
+
+### 2.2 训练目标（高层描述）
+
+CoRAG 的训练目标强调**推理路径的生成**而非直接记忆答案：
+
+- 模型需学会生成：
+  - `SubQuery: ...`
+  - `SubAnswer: ...`
+  - `Final Answer: ...`
+- 用户问题与检索到的原始文档仅作为**输入上下文**，在 loss 计算中被 mask 掉（loss=0）。
+
+这样可以促使模型学习 **基于检索证据的多步推理能力**，而不是简单的端到端记忆。
+
+---
+
+## 工作流三：QA 评测与交互 Demo
+
+CoRAG 提供两种主要评测与调试方式：
+
+- 使用 `custom_batch_eval.py` 进行**批量评测**。
+- 使用 `interactive_demo.py` 进行**交互式调试与展示**。
+
+### 3.1 批量评测：`scripts/custom_batch_eval.py`
+
+`custom_batch_eval.py` 会在自定义评测集上运行 CoRAG agent，并可选地计算**检索召回率**，以及与朴素检索基线进行对比。
+
+示例：
+
+```bash
+python scripts/custom_batch_eval.py \
+  --eval_file data/my_eval.json \
+  --save_file results/my_eval_results.json \
+  --vllm_api_base http://localhost:8000/v1 \
+  --vllm_api_key token-123 \
+  --graph_api_url http://localhost:8023/retrieve \
+  --corpus_file data/corpus.json \
+  --max_path_length 3 \
+  --decode_strategy greedy \
+  --num_threads 16 \
+  --calc_recall \
+  --enable_naive_retrieval
+```
+
+#### 输入格式（`--eval_file`）
+
+`eval_file` 应为一个 JSON 文件，内容是**对象列表**。至少需要：
+
+- `question`：输入问题。
+- `answer`：参考答案（可选但推荐，用于日志记录）。
+
+若使用 HotpotQA / MuSiQue 等多跳数据集，还可以包含：
+
+- `paragraphs`、`context`、`supporting_facts` 等字段，脚本会据此构建 **golden facts**，用于检索召回率计算。  
+当开启 `--calc_recall` 后，脚本将：
+
+- 计算 CoRAG 的检索召回率（对所有 golden chunk 做 **Micro Recall**）。
+- 若再设置 `--enable_naive_retrieval`，则额外计算朴素单步检索的召回率。
+
+#### 输出格式（`--save_file`）
+
+`save_file` 是一个 JSON 文件，内部结构为：
+
+- 索引 0 位置是一条 **汇总对象**，包含：
+  - 平均时间开销、
+  - Micro Recall 等整体统计指标。
+- 其余位置为逐样本结果，每项包含：
+  - `question`、`answer`、`ground_truth`。
+  - `reasoning_steps`（CoRAG 的子问题与子答案列表）。
+  - `time`（时间拆分）。
+  - `corag_recall` 与 `naive_recall`（若启用相应选项）。
+
+### 3.2 交互式 Demo：`interactive_demo.py`
+
+`interactive_demo.py` 提供了一个命令行交互界面，可逐条输入问题并观察 CoRAG 的内部推理过程。
+
+示例：
+
+```bash
+python interactive_demo.py \
+  --vllm_api_base http://localhost:8000/v1 \
+  --vllm_api_key token-123 \
+  --graph_api_url http://localhost:8023/retrieve \
+  --corpus_file data/corpus.json \
+  --max_path_length 3 \
+  --decode_strategy greedy
+```
+
+运行后你会看到：
+
+- 提示：`Enter your query:`，可直接输入问题。
+- 控制台输出的**中间推理步骤**：
+  - 子问题（`SubQuery`）
+  - 子答案（`SubAnswer`）
+  - 可选的 `Thought` 以及检索到的文档 ID。
+- 最后的 CoRAG 回答显示在 `--- Final Answer ---` 部分。
+
+推荐使用该脚本来：
+
+- 验证检索 API 是否返回了合理上下文。
+- 观察 CoRAG 拆分路径（子问题序列）是否符合预期。
+- 在大规模评测前，对模型行为进行快速调试。
+
+---
+
+## 小贴士与常见问题排查
+
+- **检查 vLLM 服务是否正常**：
+  - 通过 `GET <vllm_api_base>/models` 确认至少返回一个可用模型 ID。
+  - 若自动探测失败，可显式指定 `--vllm_model`。
+- **检查检索 API 是否符合约定**：
+  - 手动 `curl` 你的 `/retrieve` 接口，确认返回结构满足上文中列出的几种格式之一。
+  - 若训练数据中 `Retrieved Context` 为空，优先检查 `--graph_api_url`、`--top_k` 以及网络连通性。
+- **Tokenizer 相关问题**：
+  - 若加载 tokenizer 失败（例如 vLLM 只在远端有权重），可以通过 `--tokenizer_name` 显式指定一个可从 HuggingFace 下载的 tokenizer repo。
+
+更多训练细节可参考 `src/train/train.py` 与 `src/train/README.md` 中的注释及说明。
